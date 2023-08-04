@@ -1,13 +1,14 @@
 from generators.model import ModelBase
 from .generator_types import Generator
 from .generator_utils import generic_generate_func_impl, generic_generate_internal_tests, generic_generate_self_reflection
-from parse import parse_code_block, add_code_block
+from .parse import parse_code_block, add_code_block
 
 from typing import List, Optional, Union
 
 RS_SIMPLE_COMPLETION_INSTRUCTION = "// Write the body of this function only."
 RS_REFLEXION_COMPLETION_INSTRUCTION = "You are a Rust writing assistant. You will be given your past function implementation, a series of unit tests, and a hint to change the implementation appropriately. Write your full implementation (restate the function signature).\n\n-----"
 RS_SELF_REFLECTION_COMPLETION_INSTRUCTION = "You are a Rust writing assistant. You will be given a function implementation and a series of unit tests. Your goal is to write a few sentences to explain why your implementation is wrong as indicated by the tests. You will need this as a hint when you try again later. Only provide the few sentence description in your answer, not the implementation.\n\n-----"
+USE_RUST_CODEBLOCK_INSTRUCTION = "Use a Rust code block to write your response. For example:\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```"
 
 RS_SIMPLE_CHAT_INSTRUCTION = "You are an AI that only responds with Rust code, NOT ENGLISH. You will be given a function signature and its docstring by the user. Write your full implementation (restate the function signature)."
 RS_REFLEXION_CHAT_INSTRUCTION = "You are an AI Rust assistant. You will be given your past function implementation, a series of unit tests, and a hint to change the implementation appropriately. Write your full implementation (restate the function signature)."
@@ -46,31 +47,20 @@ fn add(a: i32, b: i32) -> i32 {
 END EXAMPLES
 '''
 
-
 RS_TEST_GENERATION_FEW_SHOT = """For example:
 
 func signature:
-```rust
-/// For a given number n, find the largest number that divides n evenly, smaller than n
-/// >>> largest_divisor(15)
-/// 5
-fn largest_divisor(n: isize) -> isize {
-    for i in (1..n).rev() {
-        if n % i == 0 {
-            return i;
-        }
-    }
-    // if no divisor is found, return 1
-    1
-}
-```
+/// Add three numbers together.
+/// This function takes three numbers as input and returns the sum of the three numbers.
+fn add3Numbers(x: i32, y: i32, z: i32) -> i32 {
 
 unit tests:
-assert_eq!(candidate(3), 1);
-assert_eq!(candidate(7), 1);
-assert_eq!(candidate(10), 5);
-assert_eq!(candidate(100), 50);
-assert_eq!(candidate(49), 7);
+assert_eq!(add3Numbers(1, 2, 3), 6);
+assert_eq!(add3Numbers(-1, 2, 3), 4);
+assert_eq!(add3Numbers(1, -2, 3), 2);
+assert_eq!(add3Numbers(1, 2, -3), 0);
+assert_eq!(add3Numbers(-3, -2, -1), -6);
+assert_eq!(add3Numbers(0, 0, 0), 0);
 """
 
 RS_SELF_REFLECTION_FEW_SHOT = '''Example 1:
@@ -149,6 +139,7 @@ class RsGenerator(Generator):
             model=model,
             self_reflection_chat_instruction=RS_SELF_REFLECTION_CHAT_INSTRUCTION,
             self_reflection_completion_instruction=RS_SELF_REFLECTION_COMPLETION_INSTRUCTION,
+            add_code_block=lambda x: add_code_block(x, "rust"),
             self_reflection_few_shot=RS_SELF_REFLECTION_FEW_SHOT,
         )
 

@@ -1,15 +1,16 @@
-from generators.model import ModelBase
+from generators.model import ModelBase, message_to_str
 from .generator_types import Generator
 from .generator_utils import generic_generate_func_impl, generic_generate_internal_tests, generic_generate_self_reflection
 
 from typing import Optional, List, Union
 import ast
 import re
-from parse import parse_code_block, add_code_block
+from .parse import parse_code_block, add_code_block
 
 PY_SIMPLE_COMPLETION_INSTRUCTION = "# Write the body of this function only."
 PY_REFLEXION_COMPLETION_INSTRUCTION = "You are a Python writing assistant. You will be given your past function implementation, a series of unit tests, and a hint to change the implementation appropriately. Write your full implementation (restate the function signature).\n\n-----"
 PY_SELF_REFLECTION_COMPLETION_INSTRUCTION = "You are a Python writing assistant. You will be given a function implementation and a series of unit tests. Your goal is to write a few sentences to explain why your implementation is wrong as indicated by the tests. You will need this as a hint when you try again later. Only provide the few sentence description in your answer, not the implementation.\n\n-----"
+USE_PYTHON_CODEBLOCK_INSTRUCTION = "Use a Python code block to write your response. For example:\n```python\nprint('Hello world!')\n```"
 
 PY_SIMPLE_CHAT_INSTRUCTION = "You are an AI that only responds with python code, NOT ENGLISH. You will be given a function signature and its docstring by the user. Write your full implementation (restate the function signature)."
 PY_SIMPLE_CHAT_INSTRUCTION_V2 = "You are an AI that only responds with only python code. You will be given a function signature and its docstring by the user. Write your full implementation (restate the function signature)."
@@ -222,29 +223,24 @@ END OF EXAMPLES
 
 PY_TEST_GENERATION_FEW_SHOT = """Examples:
 func signature:
-def has_close_elements(numbers: List[float], threshold: float) -> bool:
-    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than
-    given threshold.
-    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)
-    False
-    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)
-    True
+def add3Numbers(x, y, z):
+    \"\"\" Add three numbers together.
+    This function takes three numbers as input and returns the sum of the three numbers.
     \"\"\"
 unit tests:
-assert has_close_elements([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3) == True
-assert has_close_elements([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05) == False
-assert has_close_elements([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True
-assert has_close_elements([1.0, 2.0, 5.9, 4.0, 5.0], 0.8) == False
-assert has_close_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1) == True
-assert has_close_elements([1.1, 2.2, 3.1, 4.1, 5.1], 1.0) == True
-assert has_close_elements([1.1, 2.2, 3.1, 4.1, 5.1], 0.5) == False"""
+assert add3Numbers(1, 2, 3) == 6
+assert add3Numbers(-1, 2, 3) == 4
+assert add3Numbers(1, -2, 3) == 2
+assert add3Numbers(1, 2, -3) == 0
+assert add3Numbers(-3, -2, -1) == -6
+assert add3Numbers(0, 0, 0) == 0
+"""
 
 PY_TEST_GENERATION_COMPLETION_INSTRUCTION = f"""You are an AI coding assistant that can write unique, diverse, and intuitive unit tests for functions given the signature and docstring.
 
 {PY_TEST_GENERATION_FEW_SHOT}"""
 
 PY_TEST_GENERATION_CHAT_INSTRUCTION = """You are an AI coding assistant that can write unique, diverse, and intuitive unit tests for functions given the signature and docstring."""
-
 
 
 class PyGenerator(Generator):
@@ -255,6 +251,7 @@ class PyGenerator(Generator):
             model=model,
             self_reflection_chat_instruction=PY_SELF_REFLECTION_CHAT_INSTRUCTION,
             self_reflection_completion_instruction=PY_SELF_REFLECTION_COMPLETION_INSTRUCTION,
+            add_code_block=lambda x: add_code_block(x, "python"),
             self_reflection_few_shot=PY_SELF_REFLECTION_FEW_SHOT
         )
 
@@ -283,6 +280,7 @@ class PyGenerator(Generator):
             simple_chat_instruction=PY_SIMPLE_CHAT_INSTRUCTION,
             reflexion_completion_instruction=PY_REFLEXION_COMPLETION_INSTRUCTION,
             simple_completion_instruction=PY_SIMPLE_COMPLETION_INSTRUCTION,
+            code_block_instruction=USE_PYTHON_CODEBLOCK_INSTRUCTION,
             parse_code_block=lambda x: parse_code_block(x, "python"),
             add_code_block=lambda x: add_code_block(x, "python"),
         )

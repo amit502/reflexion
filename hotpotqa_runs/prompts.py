@@ -140,3 +140,12 @@ reflect_prompt = PromptTemplate(
 
 
 
+
+# In prompts.py
+SUMMARIZE_REFLECTION_INSTRUCTION = """You are given a list of reflections from previous failed attempts at answering a question.
+Summarize them into a single concise reflection that captures all key lessons learned.
+
+Previous Reflections:
+{reflections}
+
+Summary:"""
