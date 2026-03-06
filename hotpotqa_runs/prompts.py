@@ -149,3 +149,14 @@ Previous Reflections:
 {reflections}
 
 Summary:"""
+
+# Critique
+CRITIQUE_INSTRUCTION = """You are given a question, a failed reasoning trajectory, and a reflection on what went wrong.
+Based on these, generate a specific, concrete action plan for the next attempt.
+Focus on WHAT EXACTLY to do differently, not just what went wrong.
+
+Question: {question}
+Failed Trajectory: {scratchpad}
+Reflection: {reflection}
+
+Concrete Action Plan:"""

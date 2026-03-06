@@ -16,7 +16,7 @@ from langchain.docstore.base import Docstore
 from langchain.prompts import PromptTemplate
 from llm import AnyOpenAILLM
 from prompts import reflect_prompt, react_agent_prompt, react_reflect_agent_prompt, REFLECTION_HEADER, LAST_TRIAL_HEADER, REFLECTION_AFTER_LAST_TRIAL_HEADER
-from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt, COT_INSTRUCTION, COT_REFLECT_INSTRUCTION, SUMMARIZE_REFLECTION_INSTRUCTION
+from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt, COT_INSTRUCTION, COT_REFLECT_INSTRUCTION, SUMMARIZE_REFLECTION_INSTRUCTION, CRITIQUE_INSTRUCTION
 from fewshots import WEBTHINK_SIMPLE6, REFLECTIONS, COT, COT_REFLECT
 
 
@@ -33,6 +33,7 @@ class ReflexionStrategy(Enum):
     LAST_ATTEMPT_AND_REFLEXION = 'last_trial_and_reflexion'
     LAST_ATTEMPT_AND_SUMMARIZED_REFLEXION = 'last_trial_and_summarized_reflexion'   # NEW
     LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION = 'last_trial_and_retrieval_reflexion'
+    LAST_ATTEMPT_AND_REFLEXION_WITH_CRITIQUE = 'last_trial_and_reflexion_with_critique'
 
 
 class CoTAgent:
@@ -307,6 +308,14 @@ class ReactReflectAgent(ReactAgent):
         )
         return format_step(self.reflect_llm(prompt))  # or reflect_llm for ReactReflectAgent
     
+    def prompt_critique(self, reflection: str) -> str:
+        prompt = CRITIQUE_INSTRUCTION.format(
+            question=self.question,
+            scratchpad=truncate_scratchpad(self.scratchpad, tokenizer=self.enc),
+            reflection=reflection
+        )
+        return format_step(self.reflect_llm(prompt))
+    
     def run(self, reset = True, reflect_strategy: ReflexionStrategy = ReflexionStrategy.REFLEXION) -> None:
         if (self.is_finished() or self.is_halted()) and not self.is_correct():
             self.reflect(reflect_strategy)
@@ -343,6 +352,21 @@ class ReactReflectAgent(ReactAgent):
             
             # Reset with single summarized reflection (replaces all previous)
             self.reflections = [summarized]
+            self.reflections_str += format_reflections(
+                self.reflections, header=REFLECTION_AFTER_LAST_TRIAL_HEADER
+            )
+        elif strategy == ReflexionStrategy.LAST_ATTEMPT_AND_REFLEXION_WITH_CRITIQUE:
+            # Last trajectory as context
+            self.reflections_str = format_last_attempt(self.question, self.scratchpad)
+            
+            # Step 1: Generate reflection on what went wrong
+            new_reflection = self.prompt_reflection()
+            
+            # Step 2: Generate concrete action plan based on trajectory + reflection
+            critique = self.prompt_critique(new_reflection)
+            
+            # Combine reflection + action plan as a single rich context
+            self.reflections += [f"Reflection: {new_reflection}\nAction Plan: {critique}"]
             self.reflections_str += format_reflections(
                 self.reflections, header=REFLECTION_AFTER_LAST_TRIAL_HEADER
             )
