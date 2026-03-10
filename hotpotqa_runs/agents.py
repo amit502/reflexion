@@ -19,6 +19,7 @@ from llm import AnyOpenAILLM
 from prompts import reflect_prompt, react_agent_prompt, react_reflect_agent_prompt, REFLECTION_HEADER, LAST_TRIAL_HEADER, REFLECTION_AFTER_LAST_TRIAL_HEADER
 from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt, COT_INSTRUCTION, COT_REFLECT_INSTRUCTION, SUMMARIZE_REFLECTION_INSTRUCTION
 from fewshots import WEBTHINK_SIMPLE6, REFLECTIONS, COT, COT_REFLECT
+from typing import Optional
 
 
 class ReflexionStrategy(Enum):
@@ -57,7 +58,7 @@ class TrajectoryRecord:
         self.reflection  = reflection
         self.success     = success
         self.error_class = error_class          # e.g. WRONG_BRIDGE_ENTITY, EARLY_FINISH …
-        self._embedding: np.ndarray | None = None
+        self._embedding: Optional[np.ndarray] = None
 
     # Lazy embedding — computed once on first access
     def embedding(self, embed_fn) -> np.ndarray:
@@ -509,7 +510,7 @@ class ReactReflectAgent(ReactAgent):
                  docstore: Docstore = Wikipedia(),
                  react_llm: AnyOpenAILLM = AnyOpenAILLM(),
                  reflect_llm: AnyOpenAILLM = AnyOpenAILLM(),
-                 trajectory_store: TrajectoryStore | None = None,
+                 trajectory_store: Optional[TrajectoryStore] = None,
                  retrieval_k: int = 5,
                  retrieval_max_failures: int = 3,
                  retrieval_max_successes: int = 2,
