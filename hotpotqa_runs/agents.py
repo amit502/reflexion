@@ -542,6 +542,10 @@ class ReactReflectAgent(ReactAgent):
             self.reflect(reflect_strategy)
         ReactAgent.run(self, reset)
 
+        if reflect_strategy == ReflexionStrategy.LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION \
+            and self.is_correct():
+            self.record_success()
+
     # ------------------------------------------------------------------
     # Reflect dispatcher
     # ------------------------------------------------------------------
