@@ -20,7 +20,7 @@ from prompts import reflect_prompt, react_agent_prompt, react_reflect_agent_prom
 from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt, COT_INSTRUCTION, COT_REFLECT_INSTRUCTION, SUMMARIZE_REFLECTION_INSTRUCTION
 from fewshots import WEBTHINK_SIMPLE6, REFLECTIONS, COT, COT_REFLECT
 from typing import Optional
-
+from sentence_transformers import SentenceTransformer
 
 class ReflexionStrategy(Enum):
     """
@@ -95,7 +95,8 @@ class TrajectoryStore:
             mmr_lambda:  trade-off between relevance and diversity in MMR
         """
         self.records: List[TrajectoryRecord] = []
-        self.embed_fn = embed_fn if embed_fn is not None else self._token_overlap_embed
+        # self.embed_fn = embed_fn if embed_fn is not None else self._token_overlap_embed
+        self.embed_fn = embed_fn if embed_fn is not None else self._sentence_transformer_embed
         self.lambda_q   = lambda_q
         self.lambda_err = lambda_err
         self.mmr_lambda = mmr_lambda
@@ -184,17 +185,36 @@ class TrajectoryStore:
 
         return selected
 
+    # @staticmethod
+    # def _token_overlap_embed(text: str) -> np.ndarray:
+    #     """
+    #     Fallback embedding: normalised bag-of-words token vector.
+    #     Works without any external model; lower quality than dense embeddings.
+    #     """
+    #     tokens = re.findall(r'\w+', text.lower())
+    #     vocab  = sorted(set(tokens))
+    #     vec    = np.array([tokens.count(w) for w in vocab], dtype=float)
+    #     norm   = np.linalg.norm(vec)
+    #     return vec / norm if norm > 0 else vec
+
+    _st_model = None  # class-level cache, loaded once
+
     @staticmethod
-    def _token_overlap_embed(text: str) -> np.ndarray:
+    def _get_st_model():
+        if TrajectoryStore._st_model is None:
+            from sentence_transformers import SentenceTransformer
+            TrajectoryStore._st_model = SentenceTransformer('all-MiniLM-L6-v2')
+        return TrajectoryStore._st_model
+
+    @staticmethod
+    def _sentence_transformer_embed(text: str) -> np.ndarray:
         """
-        Fallback embedding: normalised bag-of-words token vector.
-        Works without any external model; lower quality than dense embeddings.
+        Dense embedding using sentence-transformers all-MiniLM-L6-v2.
+        384-dim, normalised. Loaded once and cached at class level.
         """
-        tokens = re.findall(r'\w+', text.lower())
-        vocab  = sorted(set(tokens))
-        vec    = np.array([tokens.count(w) for w in vocab], dtype=float)
-        norm   = np.linalg.norm(vec)
-        return vec / norm if norm > 0 else vec
+        model = TrajectoryStore._get_st_model()
+        vec = model.encode(text, normalize_embeddings=True)
+        return vec.astype(np.float64)
 
 
 # ---------------------------------------------------------------------------
