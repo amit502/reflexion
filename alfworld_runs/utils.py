@@ -1,6 +1,7 @@
 import os
 import sys
 import openai
+from openai import OpenAI
 from tenacity import (
     retry,
     stop_after_attempt, # type: ignore
@@ -41,11 +42,22 @@ def get_chat(prompt: str, model: Model, temperature: float = 0.0, max_tokens: in
             "content": prompt
         }
     ]
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        stop=stop_strs,
-        temperature=temperature,
-    )
-    return response.choices[0]["message"]["content"]
+    # response = openai.ChatCompletion.create(
+    #     model=model,
+    #     messages=messages,
+    #     max_tokens=max_tokens,
+    #     stop=stop_strs,
+    #     temperature=temperature,
+    # )
+    # return response.choices[0]["message"]["content"]
+    model = OpenAI(base_url = "https://ellm.nrp-nautilus.io/v1", api_key=os.environ['OPENAI_API_KEY'])
+    try:
+        completion = model.chat.completions.create(
+            model="gpt-oss",
+            messages=messages
+        )
+        res= completion.choices[0].message.content
+        print(res)
+        return res
+    except Exception as e:
+        print(e)

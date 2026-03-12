@@ -54,6 +54,7 @@ def alfworld_run(env, base_prompt, memory: List[str], to_print=True, ob='', mode
         sys.stdout.flush()
     cur_step = 0
     while cur_step < 49:
+        print("STEP:",cur_step)
         action = llm(str(env_history) + ">", stop=['\n'], model=model).strip()
         env_history.add("action", action)
         observation, reward, done, info = env.step([action])
@@ -103,7 +104,9 @@ def run_trial(
     num_envs: int = len(env_configs)
 
     for z, env_config in enumerate(env_configs):
+        print("CONFIG LOOP",env)
         ob, info = env.reset()
+        print(ob,info)
         ob = '\n'.join(ob[0].split('\n\n')[1:])
         name = '/'.join(info['extra.gamefile'][0].split('/')[-3:-1])
 
@@ -140,7 +143,7 @@ def run_trial(
                 # log env results to trial log
                 with open(trial_log_path, 'a') as wf:
                     wf.write(f'\n#####\n\nEnvironment #{z}:\n{str(final_env_history)}\n\nSTATUS: {"OK" if is_success else "FAIL"}\n\n#####\n')
-
+    print("CLOSE")
     # close environment object
     env.close()
 
