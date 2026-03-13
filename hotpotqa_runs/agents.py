@@ -111,9 +111,9 @@ class TrajectoryStore:
     def retrieve(self,
                  question: str,
                  error_class: str,
-                 k: int = 3,
-                 max_failures: int = 2,
-                 max_successes: int = 1) -> List[TrajectoryRecord]:
+                 k: int = 5,
+                 max_failures: int = 3,
+                 max_successes: int = 2) -> List[TrajectoryRecord]:
         """
         Return up to k trajectories most relevant to (question, error_class).
         The result contains at most max_failures failed episodes and
