@@ -121,7 +121,7 @@ Here are some examples:
 Previous trial:
 Question: {question}{scratchpad}
 
-Reflection:"""
+Reflection:""" 
 
 react_agent_prompt = PromptTemplate(
                         input_variables=["examples", "question", "scratchpad"],

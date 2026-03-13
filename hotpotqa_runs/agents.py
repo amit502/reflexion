@@ -686,13 +686,22 @@ class ReactReflectAgent(ReactAgent):
             f"{truncate_scratchpad(self.scratchpad, tokenizer=self.enc).strip()}\n"
         )
 
+        # instruction = (
+        #     "\nBased on the trajectories above, write a concise reflection for the CURRENT "
+        #     "FAILED TRAJECTORY. Your reflection must:\n"
+        #     "  1. Identify the specific step where the reasoning went wrong.\n"
+        #     "  2. Explain why that step was wrong, referencing the successful trajectories if available.\n"
+        #     "  3. Give a concrete, actionable instruction for what to do differently next time.\n"
+        #     "  4. Be specific enough to generalise beyond this exact question.\n"
+        # )
         instruction = (
-            "\nBased on the trajectories above, write a concise reflection for the CURRENT "
-            "FAILED TRAJECTORY. Your reflection must:\n"
-            "  1. Identify the specific step where the reasoning went wrong.\n"
-            "  2. Explain why that step was wrong, referencing the successful trajectories if available.\n"
-            "  3. Give a concrete, actionable instruction for what to do differently next time.\n"
-            "  4. Be specific enough to generalise beyond this exact question.\n"
+            "\nBased on the trajectories above, write a reflection for the CURRENT "
+            "FAILED TRAJECTORY in EXACTLY this format, no other text:\n\n"
+            "FAILED_STEP: <the step number where reasoning went wrong>\n"
+            "WHAT_WENT_WRONG: <one sentence explaining the root cause>\n"
+            "WHAT_TO_DO_DIFFERENTLY: <exact first action to take in next trial, "
+            "e.g. 'Search[Inception director] instead of Search[Inception]'>\n"
+            "GENERALISATION: <one sentence on when this fix applies beyond this question>\n"
         )
 
         return (
@@ -733,15 +742,41 @@ class ReactReflectAgent(ReactAgent):
         return format_step(self.reflect_llm(self._build_reflection_prompt()))
 
     def _build_reflection_prompt(self) -> str:
-        return self.reflect_prompt.format(
+        base= self.reflect_prompt.format(
                             examples=self.reflect_examples,
                             question=self.question,
                             scratchpad=truncate_scratchpad(self.scratchpad, tokenizer=self.enc))
+        structured_suffix = (
+            "\nWrite your reflection in EXACTLY this format, no other text:\n\n"
+            "FAILED_STEP: <step number>\n"
+            "WHAT_WENT_WRONG: <one sentence>\n"
+            "WHAT_TO_DO_DIFFERENTLY: <exact first action for next trial>\n"
+            "GENERALISATION: <one sentence>\n"
+        )
+        return base + structured_suffix 
  
+    # def _build_agent_prompt(self) -> str:
+    #     return self.agent_prompt.format(
+    #                         examples=self.react_examples,
+    #                         reflections=self.reflections_str,
+    #                         question=self.question,
+    #                         scratchpad=self.scratchpad)
+
     def _build_agent_prompt(self) -> str:
+        if self.reflections_str:
+            emphasis = (
+                "!! IMPORTANT: You have attempted this question before and FAILED. "
+                "Read the reflection below carefully. "
+                "You MUST change your approach — do NOT repeat the same actions as your previous attempt. "
+                "Your very first action should directly follow WHAT_TO_DO_DIFFERENTLY below !!\n\n"
+            )
+            reflections_with_emphasis = emphasis + self.reflections_str
+        else:
+            reflections_with_emphasis = self.reflections_str
+
         return self.agent_prompt.format(
                             examples=self.react_examples,
-                            reflections=self.reflections_str,
+                            reflections=reflections_with_emphasis,
                             question=self.question,
                             scratchpad=self.scratchpad)
 
