@@ -116,16 +116,39 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 sys.path.append('..')
-root  = '../root/'
+root = '../root/'
 
-from util import summarize_react_trial, log_react_trial, save_agents
-from agents import ReactReflectAgent, ReactAgent, ReflexionStrategy
+from agents import CoTAgent, ReflexionStrategy
+from util import summarize_trial, log_trial, save_agents
 
 
 hotpot = joblib.load('../data/hotpot-qa-distractor-sample.joblib').reset_index(drop = True)
-strategy: ReflexionStrategy = ReflexionStrategy.NONE
-agent_cls = ReactReflectAgent if strategy != ReflexionStrategy.NONE else ReactAgent
-agents = [agent_cls(row['question'], row['answer']) for i, row in hotpot.iterrows()]
+
+hotpot['supporting_paragraphs'] = None
+for ind, row in hotpot.iterrows():
+    if ind>0: continue
+    supporting_articles = row['supporting_facts']['title']
+    articles = row['context']['title']
+    sentences = row['context']['sentences'] 
+    supporting_paragraphs = []
+    for article in supporting_articles:
+        supporting_paragraph = ''.join(sentences[np.where(articles == article)][0])
+        supporting_paragraphs.append(supporting_paragraph)
+    supporting_paragraphs = '\n\n'.join(supporting_paragraphs)
+    hotpot.at[ind, 'supporting_paragraphs'] = supporting_paragraphs
+
+strategy: ReflexionStrategy = ReflexionStrategy.LAST_ATTEMPT_AND_REFLEXION
+
+from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt
+from fewshots import COT, COT_REFLECT
+agents = [CoTAgent(row['question'],
+                   row['supporting_paragraphs'],
+                   row['answer'],
+                   agent_prompt=cot_agent_prompt if strategy == ReflexionStrategy.NONE else cot_reflect_agent_prompt,
+                   cot_examples=COT,
+                   reflect_prompt=cot_reflect_prompt,
+                   reflect_examples=COT_REFLECT,
+                    ) for _, row in hotpot.iterrows()]
 
 n = 5
 trial = 0
@@ -138,26 +161,26 @@ halt_rates      = []
 incorrect_rates = []
 avg_steps       = []
 
+
 for i in range(n):
     active_agents = [a for a in agents if not a.is_correct()]
 
     for agent in active_agents:
         if strategy != ReflexionStrategy.NONE:
-            agent.run(reflect_strategy=strategy)
+            agent.run(reflexion_strategy=strategy)
         else:
             agent.run()
         print(f'Answer: {agent.key}')
 
     trial += 1
-    log += log_react_trial(agents, trial)
-    correct, incorrect, halted = summarize_react_trial(agents)
-    print(f'Finished Trial {trial}, Correct: {len(correct)}, Incorrect: {len(incorrect)}, Halted: {len(halted)}')
+    log += log_trial(agents, trial)
+    correct, incorrect = summarize_trial(agents)
+    print(f'Finished Trial {trial}, Correct: {len(correct)}, Incorrect: {len(incorrect)}')
 
     total = len(agents)
 
     # --- Success rate ---
     success_rate = len(correct)   / total if total > 0 else 0
-    halt_rate    = len(halted)    / total if total > 0 else 0
     inc_rate     = len(incorrect) / total if total > 0 else 0
 
     # --- Avg steps — only over agents that were active this trial ---
@@ -165,24 +188,22 @@ for i in range(n):
 
     trial_numbers.append(trial)
     success_rates.append(success_rate)
-    halt_rates.append(halt_rate)
     incorrect_rates.append(inc_rate)
     avg_steps.append(steps)
 
     print(
         f'  Success: {success_rate:.1%} | '
         f'Incorrect: {inc_rate:.1%} | '
-        f'Halted: {halt_rate:.1%} | '
         f'Avg Steps: {steps:.1f}'
     )
 
 # ── Save log ────────────────────────────────────────────────────────────────
-file_path = os.path.join(root, 'ReAct', strategy.value, f'{len(agents)}_questions_{trial}_trials.txt')
+file_path = os.path.join(root, 'CoT','context', strategy.value, f'{len(agents)}_questions_{trial}_trials.txt')
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 with open(file_path, 'w') as f:
     f.write(log)
 
-base_path = os.path.join(root, 'ReAct', strategy.value)
+base_path = os.path.join(root, 'CoT','context', strategy.value)
 
 # ── 1. Success rate log + plot (existing) ───────────────────────────────────
 stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_success_rate.txt')
@@ -205,32 +226,6 @@ plot_path = os.path.join(base_path, f'{len(agents)}_questions_success_rate.png')
 plt.savefig(plot_path, dpi=150)
 plt.close()
 print(f'Success rate plot saved to {plot_path}')
-
-# ── 2. Halt rate vs Incorrect rate log + plot ───────────────────────────────
-halt_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_halt_incorrect.txt')
-with open(halt_stats_path, 'w') as f:
-    f.write('Trial Number,Halt Rate,Incorrect Rate\n')
-    for t, h, inc in zip(trial_numbers, halt_rates, incorrect_rates):
-        f.write(f'{t},{h:.4f},{inc:.4f}\n')
-print(f'Halt/Incorrect log saved to {halt_stats_path}')
-
-plt.figure(figsize=(8, 5))
-plt.plot(trial_numbers, halt_rates,      marker='s', linewidth=2, markersize=6,
-         color='tomato',      label='Halt Rate')
-plt.plot(trial_numbers, incorrect_rates, marker='^', linewidth=2, markersize=6,
-         color='darkorange',  label='Incorrect Rate')
-plt.xlabel('Number of Trials')
-plt.ylabel('Rate')
-plt.title('Halt Rate vs Incorrect Rate per Trial')
-plt.xticks(trial_numbers)
-plt.ylim(0, 1)
-plt.legend()
-plt.grid(True, linestyle='--', alpha=0.6)
-plt.tight_layout()
-halt_plot_path = os.path.join(base_path, f'{len(agents)}_questions_halt_incorrect.png')
-plt.savefig(halt_plot_path, dpi=150)
-plt.close()
-print(f'Halt/Incorrect plot saved to {halt_plot_path}')
 
 # ── 3. Avg steps per trial log + plot ───────────────────────────────────────
 steps_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_avg_steps.txt')

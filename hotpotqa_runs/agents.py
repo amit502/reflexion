@@ -92,7 +92,13 @@ class CoTAgent:
         self.scratchpad += f'\nAction:'
         action = self.prompt_agent()
         self.scratchpad += ' ' + action
-        action_type, argument = parse_action(action)
+        # action_type, argument = parse_action(action)
+        print("ACTION=>", action)
+        action_type=''
+        try:
+            action_type, argument = parse_action(action)
+        except Exception as e:
+            print("Invalid Action")
         print(self.scratchpad.split('\n')[-1])  
 
         self.scratchpad += f'\nObservation: '
