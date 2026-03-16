@@ -43,7 +43,7 @@ from agents import ReactReflectAgent, ReactAgent, ReflexionStrategy
 
 
 hotpot = joblib.load('../data/hotpot-qa-distractor-sample.joblib').reset_index(drop = True)
-strategy: ReflexionStrategy = ReflexionStrategy.LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION
+strategy: ReflexionStrategy = ReflexionStrategy.RETRIEVED_TRAJECTORY_REFLEXION
 agent_cls = ReactReflectAgent if strategy != ReflexionStrategy.NONE else ReactAgent
 agents = [agent_cls(row['question'], row['answer']) for i, row in hotpot.iterrows()]
 

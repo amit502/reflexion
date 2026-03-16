@@ -29,7 +29,7 @@ class ReflexionStrategy(Enum):
     REFLEXION: Apply reflexion to the next reasoning trace 
     LAST_ATTEMPT_AND_REFLEXION: Use last reasoning trace in context and apply reflexion to the next reasoning trace 
     LAST_ATTEMPT_AND_SUMMARIZED_REFLEXION: Summarize all reflections into one compressed belief state
-    LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION: Retrieve top-k similar past trajectories (by question similarity
+    RETRIEVED_TRAJECTORY_REFLEXION: Retrieve top-k similar past trajectories (by question similarity
                                           + error class match) and use them as contrastive context when
                                           generating the reflection for the current failed episode.
     """
@@ -39,6 +39,7 @@ class ReflexionStrategy(Enum):
     LAST_ATTEMPT_AND_REFLEXION = 'last_trial_and_reflexion'
     LAST_ATTEMPT_AND_SUMMARIZED_REFLEXION = 'last_trial_and_summarized_reflexion'
     LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION = 'last_trial_and_retrieval_reflexion'
+    RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +518,7 @@ class ReactAgent:
 
 
 # ---------------------------------------------------------------------------
-# ReactReflectAgent — with LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION added
+# ReactReflectAgent — with RETRIEVED_TRAJECTORY_REFLEXION added
 # ---------------------------------------------------------------------------
 
 class ReactReflectAgent(ReactAgent):
@@ -562,7 +563,7 @@ class ReactReflectAgent(ReactAgent):
             self.reflect(reflect_strategy)
         ReactAgent.run(self, reset)
 
-        if reflect_strategy == ReflexionStrategy.LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION \
+        if reflect_strategy == ReflexionStrategy.RETRIEVED_TRAJECTORY_REFLEXION \
             and self.is_correct():
             self.record_success()
 
@@ -598,7 +599,7 @@ class ReactReflectAgent(ReactAgent):
                 self.reflections, header=REFLECTION_AFTER_LAST_TRIAL_HEADER
             )
 
-        elif strategy == ReflexionStrategy.LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION:
+        elif strategy == ReflexionStrategy.RETRIEVED_TRAJECTORY_REFLEXION:
             self._reflect_with_retrieval()
 
         else:
@@ -612,7 +613,7 @@ class ReactReflectAgent(ReactAgent):
 
     def _reflect_with_retrieval(self) -> None:
         """
-        LAST_ATTEMPT_AND_RETRIEVAL_REFLEXION strategy:
+        RETRIEVED_TRAJECTORY_REFLEXION strategy:
 
         1. Classify the current failure into an error taxonomy class.
         2. Retrieve top-k similar past trajectories from the store
