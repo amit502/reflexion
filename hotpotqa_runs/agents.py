@@ -746,39 +746,39 @@ class ReactReflectAgent(ReactAgent):
                             examples=self.reflect_examples,
                             question=self.question,
                             scratchpad=truncate_scratchpad(self.scratchpad, tokenizer=self.enc))
-        structured_suffix = (
-            "\nWrite your reflection in EXACTLY this format, no other text:\n\n"
-            "FAILED_STEP: <step number>\n"
-            "WHAT_WENT_WRONG: <one sentence>\n"
-            "WHAT_TO_DO_DIFFERENTLY: <exact first action for next trial>\n"
-            "GENERALISATION: <one sentence>\n"
-        )
-        return base + structured_suffix 
+        # structured_suffix = (
+        #     "\nWrite your reflection in EXACTLY this format, no other text:\n\n"
+        #     "FAILED_STEP: <step number>\n"
+        #     "WHAT_WENT_WRONG: <one sentence>\n"
+        #     "WHAT_TO_DO_DIFFERENTLY: <exact first action for next trial>\n"
+        #     "GENERALISATION: <one sentence>\n"
+        # )
+        return base 
  
-    # def _build_agent_prompt(self) -> str:
-    #     return self.agent_prompt.format(
-    #                         examples=self.react_examples,
-    #                         reflections=self.reflections_str,
-    #                         question=self.question,
-    #                         scratchpad=self.scratchpad)
-
     def _build_agent_prompt(self) -> str:
-        if self.reflections_str:
-            emphasis = (
-                "!! IMPORTANT: You have attempted this question before and FAILED. "
-                "Read the reflection below carefully. "
-                "You MUST change your approach — do NOT repeat the same actions as your previous attempt. "
-                "Your very first action should directly follow WHAT_TO_DO_DIFFERENTLY below !!\n\n"
-            )
-            reflections_with_emphasis = emphasis + self.reflections_str
-        else:
-            reflections_with_emphasis = self.reflections_str
-
         return self.agent_prompt.format(
                             examples=self.react_examples,
-                            reflections=reflections_with_emphasis,
+                            reflections=self.reflections_str,
                             question=self.question,
                             scratchpad=self.scratchpad)
+
+    # def _build_agent_prompt(self) -> str:
+    #     if self.reflections_str:
+    #         emphasis = (
+    #             "!! IMPORTANT: You have attempted this question before and FAILED. "
+    #             "Read the reflection below carefully. "
+    #             "You MUST change your approach — do NOT repeat the same actions as your previous attempt. "
+    #             "Your very first action should directly follow WHAT_TO_DO_DIFFERENTLY below !!\n\n"
+    #         )
+    #         reflections_with_emphasis = emphasis + self.reflections_str
+    #     else:
+    #         reflections_with_emphasis = self.reflections_str
+
+    #     return self.agent_prompt.format(
+    #                         examples=self.react_examples,
+    #                         reflections=reflections_with_emphasis,
+    #                         question=self.question,
+    #                         scratchpad=self.scratchpad)
 
 
 # ---------------------------------------------------------------------------
