@@ -3,3 +3,9 @@ tenacity==8.1.0
 gym==0.26.2
 PyYAML
 alfworld==0.3.3
+matplotlib
+sentence-transformers
+pandas==1.5.3
+pydantic==1.10.13
+tiktoken==0.3.3
+huggingface_hub==0.15.1

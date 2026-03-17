@@ -1,4 +1,4 @@
-from utils import get_completion
+from utils import get_chat
 
 from typing import List, Dict, Any
 
@@ -41,7 +41,7 @@ def update_memory(trial_log_path: str, env_configs: List[Dict[str, Any]]) -> Lis
             else:
                 memory: List[str] = env['memory']
             reflection_query: str = _generate_reflection_query(env_logs[i], memory)
-            reflection: str = get_completion(reflection_query) # type: ignore
+            reflection: str = get_chat(reflection_query) # type: ignore
             env_configs[i]['memory'] += [reflection]
                 
     return env_configs
