@@ -199,7 +199,7 @@ def _parse_step_counts(trial_log_path: str) -> List[int]:
         for line in f:
             if line.startswith('Steps:'):
                 try:
-                    steps.append(int(line.strip().split(': ')[1]))
+                    steps.append(int((line or '').strip().split(': ')[1]))
                 except (IndexError, ValueError):
                     pass
     return steps

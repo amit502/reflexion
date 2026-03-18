@@ -206,7 +206,7 @@ def llm(prompt: str, model: Model, stop: List[str] = ["\n"]):
                 text = get_completion(prompt=prompt, temperature=cur_try * 0.2, stop_strs=stop)
             else:
                 text = get_chat(prompt=prompt, model=model, temperature=cur_try * 0.2, stop_strs=stop)
-            if len(text.strip()) >= 5:
+            if len((text or "").strip()) >= 5:
                 return text
             cur_try += 1
         return ""
@@ -291,7 +291,7 @@ def alfworld_run(
     cur_step = 0
     while cur_step < 49:
         print("STEP:", cur_step)
-        action = llm(str(env_history) + ">", stop=['\n'], model=model).strip()
+        action = (llm(str(env_history) + ">", stop=['\n'], model=model) or '').strip()
         env_history.add("action", action)
         observation, reward, done, info = env.step([action])
         observation, reward, done = process_ob(observation[0]), info['won'][0], done[0]
@@ -342,7 +342,7 @@ def alfworld_run_with_retrieval(
     cur_step = 0
     while cur_step < 49:
         print("STEP:", cur_step)
-        action = llm(str(env_history) + ">", stop=['\n'], model=model).strip()
+        action = (llm(str(env_history) + ">", stop=['\n'], model=model) or '').strip()
         env_history.add("action", action)
         observation, reward, done, info = env.step([action])
         observation, reward, done = process_ob(observation[0]), info['won'][0], done[0]
@@ -398,7 +398,7 @@ def alfworld_run_with_retrieval(
         error_class=error_class,
         retrieved=retrieved,
     )
-    reflection = llm_no_stop(reflection_prompt, model).strip()
+    reflection = (llm_no_stop(reflection_prompt, model) or '').strip()
     print(f"  Reflection: {reflection[:120]}...")
 
     # 4. Store failed episode
@@ -465,7 +465,7 @@ def run_trial(
         for i, (k, v) in enumerate(ALFWORLD_TASK_TYPES.items()):
             if name.startswith(k):
                 task_type = k
-                task_desc = ob.strip().split('\n')[-1] if ob.strip() else name
+                task_desc = (ob or '').strip().split('\n')[-1] if (ob or '').strip() else name
 
                 # ── Build base prompt ────────────────────────────────────────
                 if strategy == ReflexionStrategy.EXPERT_CONTEXT:

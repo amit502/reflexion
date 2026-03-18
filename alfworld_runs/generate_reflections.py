@@ -7,7 +7,7 @@ with open("./reflexion_few_shot_examples.txt", 'r') as f:
 
 def _get_scenario(s: str) -> str:
     """Parses the relevant scenario from the experience log."""
-    return s.split("Here is the task:")[-1].strip()
+    return (s.split("Here is the task:")[-1] or '').strip()
 
 def _generate_reflection_query(log_str: str, memory: List[str]) -> str:
     """Allows the Agent to reflect upon a past experience."""
