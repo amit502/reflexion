@@ -370,95 +370,103 @@ Starting run with the following parameters:
 
     # ── Trial loop ───────────────────────────────────────────────────────────
     trial_idx = args.start_trial_num
-    while trial_idx < args.num_trials:
+    try:
+        while trial_idx < args.num_trials:
 
-        with open(world_log_path, 'a') as wf:
-            wf.write(f'\n\n***** Start Trial #{trial_idx} *****\n\n')
+            with open(world_log_path, 'a') as wf:
+                wf.write(f'\n\n***** Start Trial #{trial_idx} *****\n\n')
 
-        trial_log_path            = os.path.join(args.run_name, f'trial_{trial_idx}.log')
-        trial_env_configs_log_path = os.path.join(args.run_name, f'env_results_trial_{trial_idx}.json')
+            trial_log_path            = os.path.join(args.run_name, f'trial_{trial_idx}.log')
+            trial_env_configs_log_path = os.path.join(args.run_name, f'env_results_trial_{trial_idx}.json')
 
-        if os.path.exists(trial_log_path):
-            open(trial_log_path, 'w').close()
-        if os.path.exists(trial_env_configs_log_path):
-            open(trial_env_configs_log_path, 'w').close()
+            if os.path.exists(trial_log_path):
+                open(trial_log_path, 'w').close()
+            if os.path.exists(trial_env_configs_log_path):
+                open(trial_env_configs_log_path, 'w').close()
 
-        # ── Run trial ────────────────────────────────────────────────────────
-        env_configs = run_trial(
-            trial_log_path=trial_log_path,
-            world_log_path=world_log_path,
-            trial_idx=trial_idx,
-            env_configs=env_configs,
-            use_memory=use_memory,
-            model=args.model,
-            strategy=strategy,
-            trajectory_store=trajectory_store,
-        )
+            # ── Run trial ────────────────────────────────────────────────────────
+            try:
+                env_configs = run_trial(
+                    trial_log_path=trial_log_path,
+                    world_log_path=world_log_path,
+                    trial_idx=trial_idx,
+                    env_configs=env_configs,
+                    use_memory=use_memory,
+                    model=args.model,
+                    strategy=strategy,
+                    trajectory_store=trajectory_store,
+                )
+            except Exception as e:
+                    print(f'Trial {trial_idx} failed with error: {e}')
 
-        # ── Update memory (Reflexion standard) ───────────────────────────────
-        if strategy == ReflexionStrategy.REFLEXION:
-            env_configs = update_memory(trial_log_path, env_configs)
+            # ── Update memory (Reflexion standard) ───────────────────────────────
+            if strategy == ReflexionStrategy.REFLEXION:
+                env_configs = update_memory(trial_log_path, env_configs)
 
-        # ── Save env configs ─────────────────────────────────────────────────
-        with open(trial_env_configs_log_path, 'w') as wf:
-            json.dump(env_configs, wf, indent=4)
+            # ── Save env configs ─────────────────────────────────────────────────
+            with open(trial_env_configs_log_path, 'w') as wf:
+                json.dump(env_configs, wf, indent=4)
 
-        # ── Compute metrics ──────────────────────────────────────────────────
-        num_envs     = len(env_configs)
-        num_success  = sum(1 for e in env_configs if e['is_success'])
-        # steps from env_configs (updated by run_trial)
-        active_steps = [e['steps'] for e in env_configs if e.get('steps', 0) > 0]
-        avg_steps    = float(np.mean(active_steps)) if active_steps else 0.0
+            # ── Compute metrics ──────────────────────────────────────────────────
+            num_envs     = len(env_configs)
+            num_success  = sum(1 for e in env_configs if e['is_success'])
+            # steps from env_configs (updated by run_trial)
+            active_steps = [e['steps'] for e in env_configs if e.get('steps', 0) > 0]
+            avg_steps    = float(np.mean(active_steps)) if active_steps else 0.0
 
-        # Parse halted vs failed from trial log
-        step_counts   = _parse_step_counts(trial_log_path)
-        # Halted: exhausted (repeated action, very few steps) — approximate
-        num_halted    = sum(1 for s in step_counts if 0 < s <= 3)
-        num_failed    = (num_envs - num_success) - num_halted
+            # Parse halted vs failed from trial log
+            step_counts   = _parse_step_counts(trial_log_path)
+            # Halted: exhausted (repeated action, very few steps) — approximate
+            num_halted    = sum(1 for s in step_counts if 0 < s <= 3)
+            num_failed    = (num_envs - num_success) - num_halted
 
-        success_rate  = num_success / num_envs
-        fail_rate     = max(num_failed,  0) / num_envs
-        halted_rate   = max(num_halted,  0) / num_envs
+            success_rate  = num_success / num_envs
+            fail_rate     = max(num_failed,  0) / num_envs
+            halted_rate   = max(num_halted,  0) / num_envs
 
-        trial_numbers.append(trial_idx)
-        success_rates.append(success_rate)
-        fail_rates.append(fail_rate)
-        halted_rates.append(halted_rate)
-        avg_steps_list.append(avg_steps)
+            trial_numbers.append(trial_idx)
+            success_rates.append(success_rate)
+            fail_rates.append(fail_rate)
+            halted_rates.append(halted_rate)
+            avg_steps_list.append(avg_steps)
 
-        print(
-            f'Trial {trial_idx} | '
-            f'Success: {success_rate:.1%} | '
-            f'Fail: {fail_rate:.1%} | '
-            f'Halted: {halted_rate:.1%} | '
-            f'Avg Steps: {avg_steps:.1f}'
-        )
+            print(
+                f'Trial {trial_idx} | '
+                f'Success: {success_rate:.1%} | '
+                f'Fail: {fail_rate:.1%} | '
+                f'Halted: {halted_rate:.1%} | '
+                f'Avg Steps: {avg_steps:.1f}'
+            )
 
-        with open(world_log_path, 'a') as wf:
-            wf.write(f'\n\n***** End Trial #{trial_idx} *****\n\n')
+            with open(world_log_path, 'a') as wf:
+                wf.write(f'\n\n***** End Trial #{trial_idx} *****\n\n')
 
-        trial_idx += 1
-
-    # ── Save metrics + plots ─────────────────────────────────────────────────
-    save_metrics_log(
-        base_path=logging_dir,
-        trial_numbers=trial_numbers,
-        success_rates=success_rates,
-        fail_rates=fail_rates,
-        halted_rates=halted_rates,
-        avg_steps_list=avg_steps_list,
-        num_agents=args.num_envs,
-    )
-    save_plots(
-        base_path=logging_dir,
-        trial_numbers=trial_numbers,
-        success_rates=success_rates,
-        fail_rates=fail_rates,
-        halted_rates=halted_rates,
-        avg_steps_list=avg_steps_list,
-        num_agents=args.num_envs,
-    )
-    print("Done. All metrics and plots saved.")
+            trial_idx += 1
+    finally:
+         # Always save whatever data we have, even if crashed mid-run
+        if trial_numbers:
+            # ── Save metrics + plots ─────────────────────────────────────────────────
+            save_metrics_log(
+                base_path=logging_dir,
+                trial_numbers=trial_numbers,
+                success_rates=success_rates,
+                fail_rates=fail_rates,
+                halted_rates=halted_rates,
+                avg_steps_list=avg_steps_list,
+                num_agents=args.num_envs,
+            )
+            save_plots(
+                base_path=logging_dir,
+                trial_numbers=trial_numbers,
+                success_rates=success_rates,
+                fail_rates=fail_rates,
+                halted_rates=halted_rates,
+                avg_steps_list=avg_steps_list,
+                num_agents=args.num_envs,
+            )
+            print("Done. All metrics and plots saved.")
+        else:
+            print("No trials completed, nothing to save.")
 
 
 if __name__ == '__main__':
