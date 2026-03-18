@@ -23,6 +23,7 @@ class AnyOpenAILLM:
         try:
             completion = self.model.chat.completions.create(
                 model="gpt-oss",
+                temperature=0.0,
                 messages=[
                     # {"role": "system", "content": "Talk like a pirate."},
                     {
