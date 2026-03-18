@@ -3,6 +3,9 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [alfworld-base-adapted]
+    paths:
+      - "Dockerfile-alf"
+      - ".github/workflows/docker-build.yml"
   workflow_dispatch: # ← allows manual trigger from GitHub UI
 
 jobs:
