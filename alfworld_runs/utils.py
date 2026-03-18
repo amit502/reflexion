@@ -55,10 +55,17 @@ def get_chat(prompt: str, model: Model='gpt-oss', temperature: float = 0.0, max_
         completion = model.chat.completions.create(
             model="gpt-oss",
             temperature=0.0,
-            stop=stop_strs,
+            #stop=stop_strs,
             messages=messages
         )
         res= completion.choices[0].message.content
+        if stop_strs and '\n' in res:
+            for line in res.split('\n'):
+                line = line.strip()
+                if line:
+                    res = line
+                    break
+            res = res.lstrip('>').strip()
         print(res)
         return res
     except Exception as e:
