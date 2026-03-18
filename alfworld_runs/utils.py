@@ -54,6 +54,8 @@ def get_chat(prompt: str, model: Model='gpt-oss', temperature: float = 0.0, max_
     try:
         completion = model.chat.completions.create(
             model="gpt-oss",
+            temperature=0.0,
+            stop=stop_strs,
             messages=messages
         )
         res= completion.choices[0].message.content
@@ -61,3 +63,4 @@ def get_chat(prompt: str, model: Model='gpt-oss', temperature: float = 0.0, max_
         return res
     except Exception as e:
         print(e)
+        return ""
