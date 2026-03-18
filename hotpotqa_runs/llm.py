@@ -19,13 +19,13 @@ class AnyOpenAILLM:
         #     self.model = ChatOpenAI(*args, **kwargs, base_url = "https://ellm.nrp-nautilus.io/v1", api_key=os.environ['OPENAI_API_KEY'])
         #     self.model_type = 'chat'
     
-    def __call__(self, prompt: str):
+    def __call__(self, prompt: str,system_prompt: str):
         try:
             completion = self.model.chat.completions.create(
                 model="gpt-oss",
                 temperature=0.0,
                 messages=[
-                    # {"role": "system", "content": "Talk like a pirate."},
+                    {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
                         "content": prompt,

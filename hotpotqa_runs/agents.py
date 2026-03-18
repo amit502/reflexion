@@ -16,7 +16,7 @@ from langchain.agents.react.base import DocstoreExplorer
 from langchain.docstore.base import Docstore
 from langchain.prompts import PromptTemplate
 from llm import AnyOpenAILLM
-from prompts import reflect_prompt, react_agent_prompt, react_reflect_agent_prompt, REFLECTION_HEADER, LAST_TRIAL_HEADER, REFLECTION_AFTER_LAST_TRIAL_HEADER
+from prompts import COT_REFLECTION_SYSTEM_PROMPT, COT_SYSTEM_PROMPT, REACT_SYSTEM_PROMPT, REFLECTION_SYSTEM_PROMPT, reflect_prompt, react_agent_prompt, react_reflect_agent_prompt, REFLECTION_HEADER, LAST_TRIAL_HEADER, REFLECTION_AFTER_LAST_TRIAL_HEADER,CLASSIFY_ERROR_SYSTEM_PROMPT
 from prompts import cot_agent_prompt, cot_reflect_agent_prompt, cot_reflect_prompt, COT_INSTRUCTION, COT_REFLECT_INSTRUCTION, SUMMARIZE_REFLECTION_INSTRUCTION
 from fewshots import WEBTHINK_SIMPLE6, REFLECTIONS, COT, COT_REFLECT
 from typing import Optional
@@ -293,7 +293,7 @@ def classify_error(question: str, scratchpad: str, llm: AnyOpenAILLM) -> str:
         f"Trajectory:\n{truncate_scratchpad(scratchpad)}\n\n"
         "Reply with only the error type label, nothing else."
     )
-    raw = format_step(llm(prompt))
+    raw = format_step(llm(prompt,CLASSIFY_ERROR_SYSTEM_PROMPT))
     # Accept the label even if the model adds surrounding text
     for label in TAXONOMY:
         if label in raw.upper():
@@ -347,7 +347,12 @@ class CoTAgent:
         self.scratchpad += f'\nAction:'
         action = self.prompt_agent()
         self.scratchpad += ' ' + action
-        action_type, argument = parse_action(action)
+        action_type=''
+        argument=''
+        try:
+            action_type, argument = parse_action(action)
+        except Exception as e:
+            print("Invalid Action")
         print(self.scratchpad.split('\n')[-1])  
 
         self.scratchpad += f'\nObservation: '
@@ -379,14 +384,14 @@ class CoTAgent:
         print(self.reflections_str)
     
     def prompt_reflection(self) -> str:
-        return format_step(self.self_reflect_llm(self._build_reflection_prompt()))
+        return format_step(self.self_reflect_llm(self._build_reflection_prompt(),COT_REFLECTION_SYSTEM_PROMPT))
 
     def reset(self) -> None:
         self.scratchpad: str = ''
         self.finished = False
 
     def prompt_agent(self) -> str:
-        return format_step(self.action_llm(self._build_agent_prompt()))
+        return format_step(self.action_llm(self._build_agent_prompt(),COT_SYSTEM_PROMPT))
     
     def _build_agent_prompt(self) -> str:
         return self.agent_prompt.format(
@@ -452,7 +457,8 @@ class ReactAgent:
         action = self.prompt_agent()
         self.scratchpad += ' ' + action
         print("ACTION=>", action)
-        action_type = ''
+        action_type=''
+        argument=''
         try:
             action_type, argument = parse_action(action)
         except Exception as e:
@@ -490,7 +496,7 @@ class ReactAgent:
         self.step_n += 1
 
     def prompt_agent(self) -> str:
-        return format_step(self.llm(self._build_agent_prompt()))
+        return format_step(self.llm(self._build_agent_prompt(),REACT_SYSTEM_PROMPT))
     
     def _build_agent_prompt(self) -> str:
         return self.agent_prompt.format(
@@ -649,7 +655,7 @@ class ReactReflectAgent(ReactAgent):
         reflection_prompt = self._build_retrieval_reflection_prompt(retrieved)
 
         # Step 4 — Generate reflection (1 LLM call)
-        current_reflection = format_step(self.reflect_llm(reflection_prompt))
+        current_reflection = format_step(self.reflect_llm(reflection_prompt,REFLECTION_SYSTEM_PROMPT))
         self.reflections += [current_reflection]
 
         # Step 5 — Assemble reflections_str exactly like LAST_ATTEMPT_AND_REFLEXION
@@ -737,10 +743,10 @@ class ReactReflectAgent(ReactAgent):
         prompt = SUMMARIZE_REFLECTION_INSTRUCTION.format(
             reflections='\n- '.join(self.reflections)
         )
-        return format_step(self.reflect_llm(prompt))
+        return format_step(self.reflect_llm(prompt,REFLECTION_SYSTEM_PROMPT))
 
     def prompt_reflection(self) -> str:
-        return format_step(self.reflect_llm(self._build_reflection_prompt()))
+        return format_step(self.reflect_llm(self._build_reflection_prompt(),REFLECTION_SYSTEM_PROMPT))
 
     def _build_reflection_prompt(self) -> str:
         base= self.reflect_prompt.format(
@@ -789,11 +795,25 @@ class ReactReflectAgent(ReactAgent):
 gpt2_enc = tiktoken.encoding_for_model("text-davinci-003")
 
 def parse_action(string):
-    pattern = r'(\w+)\[([^\]]+)\]'
-    match = re.search(pattern, string)
-    if match:
-        return match.group(1), match.group(2)
-    return None
+    # Try to find Finish, Search, or Lookup specifically
+    for action_type in ['Finish', 'Search', 'Lookup']:
+        pattern = rf'{action_type}\[([^\]]+)\]'
+        match = re.search(pattern, string, re.IGNORECASE)
+        if match:
+            return action_type, match.group(1)
+    return None, None
+
+# def parse_action(string):
+#     pattern = r'(\w+)\[([^\]]+)\]' #r'^(\w+)\[(.+)\]$'
+#     match = re.search(pattern, string)
+    
+#     if match:
+#         action_type = match.group(1)
+#         argument = match.group(2)
+#         return action_type, argument
+    
+#     else:
+#         return None
 
 def format_step(step: str) -> str:
     return step.strip('\n').strip().replace('\n', '') if step else ''
