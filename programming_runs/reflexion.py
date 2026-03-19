@@ -23,13 +23,14 @@ def run_reflexion(
 
     num_items = len(dataset)
     num_success = resume_success_count(dataset)
-    for i, item in enumerate_resume(dataset, log_path):
+    for i, item in enumerate_resume(dataset, log_path, resume=False):
         cur_pass = 0
         is_solved = False
         reflections = []
         implementations = []
         test_feedback = []
         cur_func_impl = ""
+        skipped=False
         while cur_pass < pass_at_k and not is_solved:
             if is_leetcode:
                 tests_i = item['visible_tests']
@@ -37,9 +38,18 @@ def run_reflexion(
                 tests_i = gen.internal_tests(item["prompt"], model, 1)
 
             # first attempt
+            # cur_func_impl = gen.func_impl(item["prompt"], model, "simple")
             cur_func_impl = gen.func_impl(item["prompt"], model, "simple")
-            implementations.append(cur_func_impl)
+            if not cur_func_impl:
+                print(f"Warning: empty implementation for problem {i}, skipping")
+                item["solution"] = ""
+                item["is_solved"] = False
+                write_jsonl(log_path, [item], append=True)
+                skipped=True
+                break
             assert isinstance(cur_func_impl, str)
+            implementations.append(cur_func_impl)
+            #assert isinstance(cur_func_impl, str)
             is_passing, feedback, _ = exe.execute(cur_func_impl, tests_i)
             test_feedback.append(feedback)
 
@@ -89,13 +99,13 @@ def run_reflexion(
 
                 cur_iter += 1
             cur_pass += 1
-
-        item["is_solved"] = is_solved
-        item["reflections"] = reflections
-        item["implementations"] = implementations
-        item["test_feedback"] = test_feedback
-        item["solution"] = cur_func_impl
-        write_jsonl(log_path, [item], append=True)
+        if not skipped:
+            item["is_solved"] = is_solved
+            item["reflections"] = reflections
+            item["implementations"] = implementations
+            item["test_feedback"] = test_feedback
+            item["solution"] = cur_func_impl
+            write_jsonl(log_path, [item], append=True)
 
         print_v(
             f'completed {i+1}/{num_items}: acc = {round(num_success/(i+1), 2)}')

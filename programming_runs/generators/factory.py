@@ -1,16 +1,15 @@
-from .py_generate import PyGenerator
-from .rs_generate import RsGenerator
-from .generator_types import Generator
-from .model import CodeLlama, ModelBase, GPT4, GPT35, StarChat, GPTDavinci
+from .model import ModelBase, GPT4, GPT35, GPTDavinci, GptOss, StarChat, CodeLlama
 
 
-def generator_factory(lang: str) -> Generator:
-    if lang == "py" or lang == "python":
+def generator_factory(lang: str):
+    if lang == "py":
+        from .py_generate import PyGenerator
         return PyGenerator()
-    elif lang == "rs" or lang == "rust":
+    elif lang == "rs":
+        from .rs_generate import RsGenerator
         return RsGenerator()
     else:
-        raise ValueError(f"Invalid language for generator: {lang}")
+        raise ValueError(f"Invalid language: {lang}")
 
 
 def model_factory(model_name: str) -> ModelBase:
@@ -18,15 +17,14 @@ def model_factory(model_name: str) -> ModelBase:
         return GPT4()
     elif model_name == "gpt-3.5-turbo":
         return GPT35()
+    elif model_name == "gpt-oss":
+        return GptOss()
     elif model_name == "starchat":
         return StarChat()
     elif model_name.startswith("codellama"):
-        # if it has `-` in the name, version was specified
-        kwargs = {}
-        if "-" in model_name:
-            kwargs["version"] = model_name.split("-")[1]
-        return CodeLlama(**kwargs)
-    elif model_name.startswith("text-davinci"):
+        version = model_name.split("-")[-1]
+        return CodeLlama(version)
+    elif model_name == "text-davinci-003":
         return GPTDavinci(model_name)
     else:
         raise ValueError(f"Invalid model name: {model_name}")

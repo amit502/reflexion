@@ -48,8 +48,24 @@ def read_jsonl_gz(path: str) -> List[dict]:
 # generator that returns the item and the index in the dataset.
 # if the results_path exists, it will skip all items that have been processed
 # before.
-def enumerate_resume(dataset, results_path):
-    if not os.path.exists(results_path):
+# def enumerate_resume(dataset, results_path):
+#     if not os.path.exists(results_path):
+#         for i, item in enumerate(dataset):
+#             yield i, item
+#     else:
+#         count = 0
+#         with jsonlines.open(results_path) as reader:
+#             for item in reader:
+#                 count += 1
+
+#         for i, item in enumerate(dataset):
+#             # skip items that have been processed before
+#             if i < count:
+#                 continue
+#             yield i, item
+
+def enumerate_resume(dataset, results_path, resume=False):
+    if not resume or not os.path.exists(results_path):
         for i, item in enumerate(dataset):
             yield i, item
     else:
@@ -57,9 +73,7 @@ def enumerate_resume(dataset, results_path):
         with jsonlines.open(results_path) as reader:
             for item in reader:
                 count += 1
-
         for i, item in enumerate(dataset):
-            # skip items that have been processed before
             if i < count:
                 continue
             yield i, item

@@ -1,13 +1,12 @@
 from typing import List, Union, Optional, Literal
 import dataclasses
-import os
 
 from tenacity import (
     retry,
     stop_after_attempt,  # type: ignore
     wait_random_exponential,  # type: ignore
 )
-from openai import OpenAI
+import openai
 
 MessageRole = Literal["system", "user", "assistant"]
 
@@ -26,31 +25,6 @@ def messages_to_str(messages: List[Message]) -> str:
     return "\n".join([message_to_str(message) for message in messages])
 
 
-def _get_client() -> OpenAI:
-    """Returns a Nautilus-hosted OpenAI client."""
-    return OpenAI(
-        base_url="https://ellm.nrp-nautilus.io/v1",
-        api_key=os.environ['OPENAI_API_KEY'],
-    )
-
-
-def _apply_stop_manually(res: str, stop_strs: Optional[List[str]]) -> str:
-    """
-    Manually apply stop tokens since gpt-oss doesn't support the stop parameter.
-    Takes the first non-empty line and strips any leading '>' the model echoes.
-    """
-    if not stop_strs or not res:
-        return res
-    if '\n' in res:
-        for line in res.split('\n'):
-            line = line.strip()
-            if line:
-                res = line
-                break
-    res = res.lstrip('>').strip()
-    return res
-
-
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def gpt_completion(
         model: str,
@@ -58,43 +32,23 @@ def gpt_completion(
         max_tokens: int = 1024,
         stop_strs: Optional[List[str]] = None,
         temperature: float = 0.0,
-        num_comps: int = 1,
+        num_comps=1,
 ) -> Union[List[str], str]:
-    """
-    Completion via Nautilus gpt-oss endpoint.
-    Uses chat API since gpt-oss is a chat model.
-    stop parameter not supported — applied manually.
-    """
-    client = _get_client()
-    messages = [{"role": "user", "content": prompt}]
-    try:
-        if num_comps == 1:
-            completion = client.chat.completions.create(
-                model="gpt-oss",
-                messages=messages,
-                temperature=0.0,
-                max_tokens=max_tokens,
-            )
-            res = completion.choices[0].message.content or ""
-            res = _apply_stop_manually(res, stop_strs)
-            return res
-        else:
-            # For num_comps > 1, make multiple calls
-            results = []
-            for _ in range(num_comps):
-                completion = client.chat.completions.create(
-                    model="gpt-oss",
-                    messages=messages,
-                    temperature=0.2,  # slight temp for diversity
-                    max_tokens=max_tokens,
-                )
-                res = completion.choices[0].message.content or ""
-                res = _apply_stop_manually(res, stop_strs)
-                results.append(res)
-            return results
-    except Exception as e:
-        print(f"gpt_completion error: {e}")
-        return "" if num_comps == 1 else [""] * num_comps
+    response = openai.Completion.create(
+        model=model,
+        prompt=prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=1,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+        stop=stop_strs,
+        n=num_comps,
+    )
+    if num_comps == 1:
+        return response.choices[0].text  # type: ignore
+
+    return [choice.text for choice in response.choices]  # type: ignore
 
 
 @retry(wait=wait_random_exponential(min=1, max=180), stop=stop_after_attempt(6))
@@ -103,39 +57,22 @@ def gpt_chat(
     messages: List[Message],
     max_tokens: int = 1024,
     temperature: float = 0.0,
-    num_comps: int = 1,
+    num_comps=1,
 ) -> Union[List[str], str]:
-    """
-    Chat completion via Nautilus gpt-oss endpoint.
-    stop parameter not supported — applied manually.
-    """
-    client = _get_client()
-    formatted = [dataclasses.asdict(message) for message in messages]
-    try:
-        if num_comps == 1:
-            completion = client.chat.completions.create(
-                model="gpt-oss",
-                messages=formatted,
-                temperature=0.0,
-                #max_tokens=max_tokens,
-            )
-            res = completion.choices[0].message.content or ""
-            return res
-        else:
-            results = []
-            for _ in range(num_comps):
-                completion = client.chat.completions.create(
-                    model="gpt-oss",
-                    messages=formatted,
-                    temperature=0.2,
-                    #max_tokens=max_tokens,
-                )
-                res = completion.choices[0].message.content or ""
-                results.append(res)
-            return results
-    except Exception as e:
-        print(f"gpt_chat error: {e}")
-        return "" if num_comps == 1 else [""] * num_comps
+    response = openai.ChatCompletion.create(
+        model=model,
+        messages=[dataclasses.asdict(message) for message in messages],
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=1,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+        n=num_comps,
+    )
+    if num_comps == 1:
+        return response.choices[0].message.content  # type: ignore
+
+    return [choice.message.content for choice in response.choices]  # type: ignore
 
 
 class ModelBase():
@@ -146,7 +83,7 @@ class ModelBase():
     def __repr__(self) -> str:
         return f'{self.name}'
 
-    def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.0, num_comps: int = 1) -> Union[List[str], str]:
+    def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.2, num_comps: int = 1) -> Union[List[str], str]:
         raise NotImplementedError
 
     def generate(self, prompt: str, max_tokens: int = 1024, stop_strs: Optional[List[str]] = None, temperature: float = 0.0, num_comps=1) -> Union[List[str], str]:
@@ -158,7 +95,7 @@ class GPTChat(ModelBase):
         self.name = model_name
         self.is_chat = True
 
-    def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.0, num_comps: int = 1) -> Union[List[str], str]:
+    def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.2, num_comps: int = 1) -> Union[List[str], str]:
         return gpt_chat(self.name, messages, max_tokens, temperature, num_comps)
 
 
@@ -172,28 +109,18 @@ class GPT35(GPTChat):
         super().__init__("gpt-3.5-turbo")
 
 
-# GptOss — Nautilus hosted model, used as default
-class GptOss(GPTChat):
-    def __init__(self):
-        super().__init__("gpt-oss")
-
-    def generate(self, prompt: str, max_tokens: int = 1024, stop_strs: Optional[List[str]] = None, temperature: float = 0.0, num_comps=1) -> Union[List[str], str]:
-        """Also supports completion-style calls via chat API."""
-        return gpt_completion("gpt-oss", prompt, max_tokens, stop_strs, temperature, num_comps)
-
-
 class GPTDavinci(ModelBase):
     def __init__(self, model_name: str):
         self.name = model_name
-        self.is_chat = False
 
-    def generate(self, prompt: str, max_tokens: int = 1024, stop_strs: Optional[List[str]] = None, temperature: float = 0.0, num_comps=1) -> Union[List[str], str]:
-        # Redirected to gpt-oss since text-davinci-003 is deprecated
-        return gpt_completion("gpt-oss", prompt, max_tokens, stop_strs, temperature, num_comps)
+    def generate(self, prompt: str, max_tokens: int = 1024, stop_strs: Optional[List[str]] = None, temperature: float = 0, num_comps=1) -> Union[List[str], str]:
+        return gpt_completion(self.name, prompt, max_tokens, stop_strs, temperature, num_comps)
 
 
 class HFModelBase(ModelBase):
-    """Base for huggingface chat models"""
+    """
+    Base for huggingface chat models
+    """
 
     def __init__(self, model_name: str, model, tokenizer, eos_token_id=None):
         self.name = model_name
@@ -203,6 +130,7 @@ class HFModelBase(ModelBase):
         self.is_chat = True
 
     def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.2, num_comps: int = 1) -> Union[List[str], str]:
+        # NOTE: HF does not like temp of 0.0.
         if temperature < 0.0001:
             temperature = 0.0001
 
@@ -210,7 +138,8 @@ class HFModelBase(ModelBase):
 
         outputs = self.model.generate(
             prompt,
-            max_new_tokens=min(max_tokens, self.model.config.max_position_embeddings),
+            max_new_tokens=min(
+                max_tokens, self.model.config.max_position_embeddings),
             use_cache=True,
             do_sample=True,
             temperature=temperature,
@@ -226,9 +155,9 @@ class HFModelBase(ModelBase):
             outs[i] = self.extract_output(out)
 
         if len(outs) == 1:
-            return outs[0]
+            return outs[0]  # type: ignore
         else:
-            return outs
+            return outs  # type: ignore
 
     def prepare_prompt(self, messages: List[Message]):
         raise NotImplementedError
@@ -246,7 +175,9 @@ class StarChat(HFModelBase):
             torch_dtype=torch.bfloat16,
             device_map="auto",
         )
-        tokenizer = AutoTokenizer.from_pretrained("HuggingFaceH4/starchat-beta")
+        tokenizer = AutoTokenizer.from_pretrained(
+            "HuggingFaceH4/starchat-beta",
+        )
         super().__init__("starchat", model, tokenizer, eos_token_id=49155)
 
     def prepare_prompt(self, messages: List[Message]):
@@ -255,12 +186,14 @@ class StarChat(HFModelBase):
             prompt += f"<|{message.role}|>\n{message.content}\n<|end|>\n"
             if i == len(messages) - 1:
                 prompt += "<|assistant|>\n"
+
         return self.tokenizer.encode(prompt, return_tensors="pt").to(self.model.device)
 
     def extract_output(self, output: str) -> str:
         out = output.split("<|assistant|>")[1]
         if out.endswith("<|end|>"):
             out = out[:-len("<|end|>")]
+
         return out
 
 
@@ -300,20 +233,27 @@ If a question does not make any sense, or is not factually coherent, explain why
         ] + messages[2:]
         assert all([msg.role == "user" for msg in messages[::2]]) and all(
             [msg.role == "assistant" for msg in messages[1::2]]
+        ), (
+            "model only supports 'system', 'user' and 'assistant' roles, "
+            "starting with 'system', then 'user' and alternating (u/a/u/a/u...)"
         )
         messages_tokens: List[int] = sum(
             [
                 self.tokenizer.encode(
                     f"{self.B_INST} {(prompt.content).strip()} {self.E_INST} {(answer.content).strip()} ",
                 )
-                for prompt, answer in zip(messages[::2], messages[1::2])
+                for prompt, answer in zip(
+                    messages[::2],
+                    messages[1::2],
+                )
             ],
             [],
         )
-        assert messages[-1].role == "user"
+        assert messages[-1].role == "user", f"Last message must be from user, got {messages[-1].role}"
         messages_tokens += self.tokenizer.encode(
             f"{self.B_INST} {(messages[-1].content).strip()} {self.E_INST}",
         )
+        # remove eos token from last message
         messages_tokens = messages_tokens[:-1]
         import torch
         return torch.tensor([messages_tokens]).to(self.model.device)
