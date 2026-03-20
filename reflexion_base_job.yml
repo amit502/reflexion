@@ -1,0 +1,67 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: reflexion-base-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true" # ← ADDED BACK: needed since we have a PVC again
+      containers:
+        - name: reflexion-trainer
+          image: ghcr.io/amit502/reflexion:latest # ← Your custom image
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/reflexion # ← Mount point for PVC
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              # Clone your repository
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git fetch origin reflexion-base
+              git checkout reflexion-base
+              pip install -r hotpotqa_runs/requirements.txt
+              cd hotpotqa_runs/notebooks
+
+              # Run your project
+              python ReactQA.py
+
+              mkdir -p ${RESULTS_PATH}
+              # Copy results folder to PVC
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/hotpotqa_runs/root/ReAct/last_trial_and_reflexion/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results # ← PVC mounted here
+          resources:
+            limits:
+              memory: 2Gi
+              cpu: "1"
+            requests:
+              memory: 2Gi
+              cpu: "1"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc # ← Your PVC name
+      restartPolicy: Never
+  backoffLimit: 1

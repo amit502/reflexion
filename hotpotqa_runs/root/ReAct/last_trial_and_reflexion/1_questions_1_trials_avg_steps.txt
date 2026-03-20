@@ -1,0 +1,2 @@
+Trial Number,Avg Steps
+1,7.0000

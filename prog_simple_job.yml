@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prog-simple-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true" # ← ADDED BACK: needed since we have a PVC again
+      containers:
+        - name: reflexion-container
+          image: ghcr.io/amit502/reflexion:latest # ← Your custom image
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/prog/simple # ← Mount point for PVC
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              # Clone your repository
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git fetch origin programming-base
+              git checkout programming-base
+              pip install -r programming_runs/requirements.txt
+              cd programming_runs
+              rm -rf ./root/simple
+
+              # Run your project
+              ./prog_simple_generation.sh
+
+              mkdir -p ${RESULTS_PATH}
+              # Copy results folder to PVC
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/programming_runs/root/simple/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results # ← PVC mounted here
+          resources:
+            limits:
+              memory: 2Gi
+              cpu: "1"
+            requests:
+              memory: 2Gi
+              cpu: "1"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc # ← Your PVC name
+      restartPolicy: Never
+  backoffLimit: 1

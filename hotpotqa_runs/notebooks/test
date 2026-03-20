@@ -1,0 +1,86 @@
+#!/bin/bash
+
+#SBATCH --output=biresnet_%j.out
+#SBATCH --error=biresnet_%j.err
+
+# Example GPU job submission script
+
+# This is a comment.
+# Lines beginning with the # symbol are comments and are not interpreted by 
+# the Job Scheduler.
+
+# Lines beginning with #SBATCH are special commands to configure the job.
+                
+### Job Configuration Starts Here #############################################
+
+# Export all current environment variables to the job (Don't change this)
+#SBATCH --get-user-env 
+
+#SBATCH --job-name=biresnet
+                        
+# The default is one task per node
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --exclusive
+
+# Request 1 GPU
+# Each gpu node has two logical GPUs, so up to 2 can be requested per node
+# To request 2 GPUs use --gres=gpu:pascal:2
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:volta:1 
+
+#request 10 minutes of runtime - the job will be killed if it exceeds this
+#SBATCH --time=48:00:00
+
+# Change email@example.com to your real email address
+#SBATCH --mail-user=amit.patel@coyotes.usd.edu
+#SBATCH --mail-type=ALL
+
+
+
+### Commands to run your program start here ####################################
+
+# --- Move to directory where the script is located ---
+cd $SLURM_SUBMIT_DIR
+echo "Working directory: $(pwd)"
+
+# --- Load Python module ---
+module load python/3.11.9-gcc-14.2.0
+#python/3.9.12-gcc-8.5.0
+
+# --- Create and activate virtual environment ---
+if [ ! -d "bienv" ]; then
+    python3 -m venv bienv
+fi
+
+
+source bienv/bin/activate
+
+# DEBUG: Print which python/pip Slurm is using
+echo "Using Python from: $(which python)"
+echo "Python version: $(python --version)"
+echo "Using Pip from: $(which pip)"
+
+# --- Install requirements ---
+pip install --upgrade pip
+pip install -r biresnet/requirements.txt
+
+
+# --- Run main program ---
+cd biresnet
+echo "Running train.py..."
+#python train.py --dataset cifar10 --model biresnet --epochs 30 --use_noise --use_blur
+#python eval.py --dataset cifar10 --model biresnet --ckpt checkpoints/cifar10_biresnet.pth
+#python train.py --model biresnet --epochs 30 --use_noise --use_blur
+python train.py --dataset cifar10 --epochs 40 --run_all
+python eval.py --dataset cifar10 --eval_all
+python train.py --dataset cifar100 --epochs 40 --run_all
+python eval.py --dataset cifar100 --eval_all
+#python train.py --dataset cifar10 --epochs 80 --model baseline_res50
+#python train.py --dataset cifar10 --epochs 80 --model shape_res50
+#python eval.py --dataset cifar10 --model baseline_res50 --ckpt checkpoints/baseline_res50_cifar10.pt
+#python eval.py --dataset cifar10 --model shape_res50 --ckpt checkpoints/shape_res50_cifar10.pt
+#python train.py --dataset cifar10 --epochs 40 --model shape_res18
+#python eval.py --dataset cifar10 --model shape_res18 --ckpt checkpoints/shape_res18_cifar10.pt
+
+echo "Job completed."

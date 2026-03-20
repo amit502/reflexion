@@ -1,0 +1,141 @@
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: reflexion-train-job
+# spec:
+#   template:
+#     spec:
+#       nodeSelector:
+#         topology.kubernetes.io/region: us-west
+#         nautilus.io/linstor: "true"
+#       containers:
+#         - name: reflexion-trainer
+#           image: gitlab-registry.nrp-nautilus.io/prp/jupyter-stack/prp
+#           env:
+#             - name: REPO_PATH
+#               value: /app/pytorch-CycleGAN-and-pix2pix
+#           command:
+#             - "bash"
+#             - "-c"
+#           args:
+#             - |
+#               # Install decompression tools (matching data pod)
+#               sudo apt-get update && sudo apt-get install -y pigz pv
+
+#               # Clone repository
+#               git clone https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix.git ${REPO_PATH}
+#               cd ${REPO_PATH}
+
+#               # Install requirements
+#               pip install -r requirements.txt
+
+#               # Extract compressed data (matching data pod format)
+#               LATEST_DATASET=$(ls -t /data/processed_data_*.tar.gz 2>/dev/null | head -1)
+#               if [ -n "$LATEST_DATASET" ]; then
+#                 echo "Found dataset: $LATEST_DATASET"
+#                 pv "$LATEST_DATASET" | pigz -d | tar -xf - -C ${REPO_PATH}/datasets/
+#                 echo "Dataset extracted to ${REPO_PATH}/datasets/"
+#               else
+#                 echo "No datasets found - run data_pod.yml first"
+#               fi
+
+#               python train.py --dataroot ${REPO_PATH}/datasets/horse2zebra --name test_run --model cycle_gan --n_epochs 5
+
+#               echo "Training complete!"
+#           volumeMounts:
+#             - name: git-repo
+#               mountPath: /app
+#             - name: data-volume
+#               mountPath: /data
+#             - name: dshm
+#               # Shared memory volume for PyTorch DataLoader multiprocessing
+#               # PyTorch workers need space to transfer loaded batches to main process
+#               mountPath: /dev/shm
+#           resources:
+#             limits:
+#               memory: 24Gi
+#               cpu: "12"
+#               nvidia.com/gpu: "1"
+#             requests:
+#               memory: 20Gi
+#               cpu: "10"
+#               nvidia.com/gpu: "1"
+#       volumes:
+#         - name: git-repo
+#           emptyDir: {}
+#         - name: data-volume
+#           persistentVolumeClaim:
+#             claimName: cyclegan-data-pvc
+#         - name: dshm
+#           emptyDir:
+#             medium: Memory
+#             sizeLimit: 8Gi
+#       restartPolicy: Never
+#   backoffLimit: 1
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: react-base-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true" # ← ADDED BACK: needed since we have a PVC again
+      containers:
+        - name: reflexion-container
+          image: ghcr.io/amit502/reflexion:latest # ← Your custom image
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/react # ← Mount point for PVC
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              # Clone your repository
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git checkout main
+              pip install -r hotpotqa_runs/requirements.txt
+              cd hotpotqa_runs/notebooks
+
+              # Run your project
+              python ReactQA.py
+
+              mkdir -p ${RESULTS_PATH}
+              # Copy results folder to PVC
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/hotpotqa_runs/root/ReAct/base/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results # ← PVC mounted here
+          resources:
+            limits:
+              memory: 2Gi
+              cpu: "1"
+            requests:
+              memory: 2Gi
+              cpu: "1"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc # ← Your PVC name
+      restartPolicy: Never
+  backoffLimit: 1
