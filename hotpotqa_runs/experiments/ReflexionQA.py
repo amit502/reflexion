@@ -185,12 +185,12 @@ with open(file_path, 'w') as f:
 base_path = os.path.join(root, 'ReAct', strategy.value)
 
 # ── 1. Success rate log + plot (existing) ───────────────────────────────────
-stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_success_rate.txt')
-with open(stats_path, 'w') as f:
-    f.write('Trial Number,Success Rate\n')
-    for t, s in zip(trial_numbers, success_rates):
-        f.write(f'{t},{s:.4f}\n')
-print(f'Success rate log saved to {stats_path}')
+# stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_success_rate.txt')
+# with open(stats_path, 'w') as f:
+#     f.write('Trial Number,Success Rate\n')
+#     for t, s in zip(trial_numbers, success_rates):
+#         f.write(f'{t},{s:.4f}\n')
+# print(f'Success rate log saved to {stats_path}')
 
 plt.figure(figsize=(8, 5))
 plt.plot(trial_numbers, success_rates, marker='o', linewidth=2, markersize=6, color='steelblue')
@@ -207,12 +207,12 @@ plt.close()
 print(f'Success rate plot saved to {plot_path}')
 
 # ── 2. Halt rate vs Incorrect rate log + plot ───────────────────────────────
-halt_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_halt_incorrect.txt')
-with open(halt_stats_path, 'w') as f:
-    f.write('Trial Number,Halt Rate,Incorrect Rate\n')
-    for t, h, inc in zip(trial_numbers, halt_rates, incorrect_rates):
-        f.write(f'{t},{h:.4f},{inc:.4f}\n')
-print(f'Halt/Incorrect log saved to {halt_stats_path}')
+# halt_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_halt_incorrect.txt')
+# with open(halt_stats_path, 'w') as f:
+#     f.write('Trial Number,Halt Rate,Incorrect Rate\n')
+#     for t, h, inc in zip(trial_numbers, halt_rates, incorrect_rates):
+#         f.write(f'{t},{h:.4f},{inc:.4f}\n')
+# print(f'Halt/Incorrect log saved to {halt_stats_path}')
 
 plt.figure(figsize=(8, 5))
 plt.plot(trial_numbers, halt_rates,      marker='s', linewidth=2, markersize=6,
@@ -233,12 +233,12 @@ plt.close()
 print(f'Halt/Incorrect plot saved to {halt_plot_path}')
 
 # ── 3. Avg steps per trial log + plot ───────────────────────────────────────
-steps_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_avg_steps.txt')
-with open(steps_stats_path, 'w') as f:
-    f.write('Trial Number,Avg Steps\n')
-    for t, s in zip(trial_numbers, avg_steps):
-        f.write(f'{t},{s:.4f}\n')
-print(f'Avg steps log saved to {steps_stats_path}')
+# steps_stats_path = os.path.join(base_path, f'{len(agents)}_questions_{trial}_trials_avg_steps.txt')
+# with open(steps_stats_path, 'w') as f:
+#     f.write('Trial Number,Avg Steps\n')
+#     for t, s in zip(trial_numbers, avg_steps):
+#         f.write(f'{t},{s:.4f}\n')
+# print(f'Avg steps log saved to {steps_stats_path}')
 
 plt.figure(figsize=(8, 5))
 plt.plot(trial_numbers, avg_steps, marker='D', linewidth=2, markersize=6, color='mediumseagreen')
@@ -253,3 +253,20 @@ steps_plot_path = os.path.join(base_path, f'{len(agents)}_questions_avg_steps.pn
 plt.savefig(steps_plot_path, dpi=150)
 plt.close()
 print(f'Avg steps plot saved to {steps_plot_path}')
+
+# ── Save log ────────────────────────────────────────────────────────────────
+file_path = os.path.join(root, 'ReAct', strategy.value, f'{len(agents)}_questions_{trial}_trials.txt')
+os.makedirs(os.path.dirname(file_path), exist_ok=True)
+with open(file_path, 'w') as f:
+    f.write(log)
+
+base_path = os.path.join(root, 'ReAct', strategy.value)
+
+# ── Single unified CSV (matches ALFWorld format) ─────────────────────────────
+csv_path = os.path.join(base_path, f'{len(agents)}_questions_metrics.csv')
+with open(csv_path, 'w') as f:
+    f.write('Trial,SuccessRate,FailRate,HaltedRate,AvgSteps\n')
+    for t, s, fa, h, st in zip(trial_numbers, success_rates,
+                                incorrect_rates, halt_rates, avg_steps):
+        f.write(f'{t},{s:.4f},{fa:.4f},{h:.4f},{st:.4f}\n')
+print(f'Metrics CSV saved to {csv_path}')
