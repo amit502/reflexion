@@ -217,6 +217,8 @@ def run_retrieval_reflexion(
                 retrieved = trajectory_store.retrieve(
                     func_sig=func_sig,
                     error_class=error_class,
+                    feedback=cur_feedback,        
+                    implementation=cur_func_impl, 
                     k=3,
                     max_failures=2,
                     max_successes=1,
