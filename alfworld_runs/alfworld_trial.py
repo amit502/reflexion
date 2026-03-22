@@ -382,6 +382,7 @@ def alfworld_run_with_retrieval(
         task_type=task_type,
         task_desc=task_desc,
         error_class=error_class,
+        history_str=str(env_history),
         k=retrieval_k,
         max_failures=retrieval_max_failures,
         max_successes=retrieval_max_successes,
