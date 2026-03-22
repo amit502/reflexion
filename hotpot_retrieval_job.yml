@@ -30,8 +30,8 @@ spec:
               # Clone your repository
               git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
               cd ${REPO_PATH}
-              # git fetch origin main
-              git checkout main
+              git fetch origin quantum-retrieval
+              git checkout quantum-retrieval
               pip install -r hotpotqa_runs/requirements.txt
               cd hotpotqa_runs/experiments
 
