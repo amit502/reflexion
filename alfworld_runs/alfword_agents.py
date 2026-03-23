@@ -14,36 +14,21 @@ from enum import Enum
 from typing import List, Dict, Any, Tuple, Optional
 
 
-# ---------------------------------------------------------------------------
-# Strategy enum
-# ---------------------------------------------------------------------------
-
 class ReflexionStrategy(Enum):
-    """
-    NONE:                           ReAct only — no memory, no reflection
-    REFLEXION:                      ReAct + standard reflexion (last 3 reflections in memory)
-    EXPERT_CONTEXT:                 CoT + Expert context (ALFWorld analog of CoT+Context)
-    RETRIEVED_TRAJECTORY_REFLEXION: Retrieve top-k similar past trajectories by task type
-                                    + embedding similarity, diversified via MMR, then reflect
-    """
     NONE                           = 'base'
     REFLEXION                      = 'reflexion'
     EXPERT_CONTEXT                 = 'expert_context'
     RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
 
 
-# ---------------------------------------------------------------------------
-# ALFWorld error taxonomy
-# ---------------------------------------------------------------------------
-
 ALFWORLD_ERROR_TAXONOMY = [
-    "WRONG_LOCATION",        # looked in wrong receptacles
-    "WRONG_OBJECT",          # picked up / interacted with wrong object
-    "LOOP_DETECTED",         # repeated same action cycle
-    "INEFFICIENT_PLAN",      # exceeded step budget without progress
-    "MISSING_STEP",          # skipped a required sub-task (e.g. forgot to clean before place)
-    "OBJECT_NOT_IN_HAND",    # tried to use object not currently held
-    "RECEPTACLE_NOT_OPEN",   # tried to place in closed container
+    "WRONG_LOCATION",
+    "WRONG_OBJECT",
+    "LOOP_DETECTED",
+    "INEFFICIENT_PLAN",
+    "MISSING_STEP",
+    "OBJECT_NOT_IN_HAND",
+    "RECEPTACLE_NOT_OPEN",
     "UNKNOWN",
 ]
 
@@ -57,23 +42,11 @@ ALFWORLD_TASK_TYPES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# TrajectoryRecord + TrajectoryStore  (ALFWorld-adapted)
-# ---------------------------------------------------------------------------
-
 class TrajectoryRecord:
-    """Stores a single ALFWorld episode for later retrieval."""
-
-    def __init__(self,
-                 task_type: str,
-                 task_desc: str,
-                 history_str: str,
-                 reflection: str,
-                 success: bool,
-                 error_class: str = "UNKNOWN"):
-        self.task_type   = task_type    # e.g. 'pick_and_place'
-        self.task_desc   = task_desc    # the natural-language task string
-        self.history_str = history_str  # full action/observation trace
+    def __init__(self, task_type, task_desc, history_str, reflection, success, error_class="UNKNOWN"):
+        self.task_type   = task_type
+        self.task_desc   = task_desc
+        self.history_str = history_str
         self.reflection  = reflection
         self.success     = success
         self.error_class = error_class
@@ -89,33 +62,23 @@ class TrajectoryStore:
     """
     Episodic memory of past ALFWorld trajectories.
 
-    Retrieval scoring:
-        score = λ_type * (task_type_i == task_type_curr)   # same task category
-              + λ_q    * cos_sim(task_desc_i, task_desc_curr)  # semantic similarity
-              + λ_err  * (error_class_i == error_class_curr)   # same failure mode
-
-    Then MMR is applied for diversity, and results are balanced between
-    failures and successes.
+    Retrieval uses error-first filtering with 2-level fallback:
+        Level 1: same error_class AND same task_type  (strongest signal)
+        Level 2: same task_type only                  (drop error_class)
+        Level 3: all failures                         (drop both filters)
+    Then ranks filtered candidates by pure cosine similarity via sentence transformer.
+    Successes always included as contrastive anchors.
+    MMR applied for diversity within each pool.
     """
 
-    _st_model = None  # class-level cache
+    _st_model = None
 
     def __init__(self,
                  embed_fn=None,
-                 lambda_type: float = 0.4,
-                 lambda_q:    float = 0.4,
-                 lambda_err:  float = 0.2,
-                 mmr_lambda:  float = 0.5):
-        self.records:     List[TrajectoryRecord] = []
-        self.embed_fn     = embed_fn if embed_fn is not None else self._sentence_transformer_embed
-        self.lambda_type  = lambda_type
-        self.lambda_q     = lambda_q
-        self.lambda_err   = lambda_err
-        self.mmr_lambda   = mmr_lambda
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+                 mmr_lambda: float = 0.5):
+        self.records:   List[TrajectoryRecord] = []
+        self.embed_fn   = embed_fn if embed_fn is not None else self._sentence_transformer_embed
+        self.mmr_lambda = mmr_lambda
 
     def add(self, record: TrajectoryRecord) -> None:
         self.records.append(record)
@@ -132,36 +95,51 @@ class TrajectoryStore:
 
         q_emb = self.embed_fn(task_desc)
 
-        scored: List[Tuple[float, TrajectoryRecord]] = []
-        for rec in self.records:
-            sim_type = float(rec.task_type == task_type)
-            sim_q    = float(np.dot(q_emb, rec.embedding(self.embed_fn)))
-            sim_err  = float(rec.error_class == error_class)
-            score    = (self.lambda_type * sim_type
-                        + self.lambda_q  * sim_q
-                        + self.lambda_err * sim_err)
-            scored.append((score, rec))
+        # ── Error-first filtering with 2-level fallback ──────────────────────
+        # Successes always included as contrastive anchors
+        successes_pool = [r for r in self.records if r.success]
 
-        scored.sort(key=lambda x: x[0], reverse=True)
+        # Level 1: same error_class AND same task_type (strongest signal)
+        failure_candidates = [
+            r for r in self.records
+            if not r.success
+            and r.error_class == error_class
+            and r.task_type == task_type
+        ]
+        # Level 2: same task_type only (drop error_class requirement)
+        if len(failure_candidates) < k:
+            failure_candidates = [
+                r for r in self.records
+                if not r.success and r.task_type == task_type
+            ]
+        # Level 3: all failures (drop both filters)
+        if len(failure_candidates) < k:
+            failure_candidates = [r for r in self.records if not r.success]
+        # ─────────────────────────────────────────────────────────────────────
 
-        failures  = [(s, r) for s, r in scored if not r.success]
-        successes = [(s, r) for s, r in scored if r.success]
+        # Rank filtered failures by pure cosine similarity
+        scored_failures: List[Tuple[float, TrajectoryRecord]] = []
+        for rec in failure_candidates:
+            sim_q = float(np.dot(q_emb, rec.embedding(self.embed_fn)))
+            scored_failures.append((sim_q, rec))
+        scored_failures.sort(key=lambda x: x[0], reverse=True)
 
-        selected_failures  = self._mmr_select(failures,  max_failures)
-        selected_successes = self._mmr_select(successes, max_successes)
+        # Rank successes by cosine similarity
+        scored_successes: List[Tuple[float, TrajectoryRecord]] = []
+        for rec in successes_pool:
+            sim_q = float(np.dot(q_emb, rec.embedding(self.embed_fn)))
+            scored_successes.append((sim_q, rec))
+        scored_successes.sort(key=lambda x: x[0], reverse=True)
+
+        selected_failures  = self._mmr_select(scored_failures,  max_failures)
+        selected_successes = self._mmr_select(scored_successes, max_successes)
 
         return selected_failures + selected_successes
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _mmr_select(self,
-                    scored: List[Tuple[float, TrajectoryRecord]],
-                    k: int) -> List[TrajectoryRecord]:
+    def _mmr_select(self, scored, k):
         if not scored:
             return []
-        selected: List[TrajectoryRecord] = []
+        selected = []
         candidates = list(scored)
         while len(selected) < k and candidates:
             if not selected:
@@ -175,8 +153,7 @@ class TrajectoryStore:
                         float(np.dot(rec.embedding(self.embed_fn), se))
                         for se in sel_embs
                     )
-                    mmr = (self.mmr_lambda * rel_score
-                           - (1 - self.mmr_lambda) * max_sim)
+                    mmr = self.mmr_lambda * rel_score - (1 - self.mmr_lambda) * max_sim
                     if mmr > best_score:
                         best_score = mmr
                         best = rec
@@ -198,10 +175,6 @@ class TrajectoryStore:
         return vec.astype(np.float64)
 
 
-# ---------------------------------------------------------------------------
-# Prompt helpers
-# ---------------------------------------------------------------------------
-
 RETRIEVAL_REFLECTION_HEADER = """\
 You are an expert at diagnosing failures in household task agents.
 Below you will find:
@@ -213,6 +186,7 @@ reference for the correct approach. Use failed ones to spot recurring mistakes.
 Then write a concise, actionable reflection for the CURRENT trajectory ONLY.
 
 """
+
 
 def format_retrieved_trajectories(records: List[TrajectoryRecord]) -> str:
     if not records:
@@ -242,20 +216,13 @@ def format_retrieved_trajectories(records: List[TrajectoryRecord]) -> str:
 
 
 def _truncate_history(history_str: str, max_chars: int = 1500) -> str:
-    """Truncate long trajectories from the middle to fit context."""
     if len(history_str) <= max_chars:
         return history_str
     half = max_chars // 2
     return history_str[:half] + '\n...[truncated]...\n' + history_str[-half:]
 
 
-def classify_alfworld_error(task_desc: str,
-                             history_str: str,
-                             llm_fn) -> str:
-    """
-    Ask the LLM to classify the ALFWorld failure into one of the known error types.
-    llm_fn: callable(prompt: str) -> str
-    """
+def classify_alfworld_error(task_desc: str, history_str: str, llm_fn) -> str:
     prompt = (
         "Classify the following failed household-task trajectory into exactly ONE of these error types:\n"
         f"{', '.join(ALFWORLD_ERROR_TAXONOMY)}\n\n"
@@ -270,13 +237,8 @@ def classify_alfworld_error(task_desc: str,
     return "UNKNOWN"
 
 
-def build_retrieval_reflection_prompt(task_type: str,
-                                       task_desc: str,
-                                       history_str: str,
-                                       error_class: str,
-                                       retrieved: List[TrajectoryRecord]) -> str:
+def build_retrieval_reflection_prompt(task_type, task_desc, history_str, error_class, retrieved):
     retrieved_context = format_retrieved_trajectories(retrieved)
-
     current_block = (
         "\n=== CURRENT FAILED TRAJECTORY ===\n"
         f"Task type:  {task_type}\n"
@@ -284,7 +246,6 @@ def build_retrieval_reflection_prompt(task_type: str,
         f"Error class: {error_class}\n\n"
         f"{_truncate_history(history_str).strip()}\n"
     )
-
     instruction = (
         "\nWrite a reflection for the CURRENT FAILED TRAJECTORY in EXACTLY this format:\n\n"
         "FAILED_STEP: <the action where things went wrong>\n"
@@ -293,5 +254,4 @@ def build_retrieval_reflection_prompt(task_type: str,
         "e.g. 'go to fridge 1' instead of 'go to countertop 1'>\n"
         "GENERALISATION: <one sentence on when this fix applies beyond this exact task>\n"
     )
-
     return RETRIEVAL_REFLECTION_HEADER + retrieved_context + current_block + instruction

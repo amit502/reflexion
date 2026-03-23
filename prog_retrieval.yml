@@ -30,8 +30,8 @@ spec:
               # Clone your repository
               git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
               cd ${REPO_PATH}
-              # git fetch origin main
-              git checkout main
+              git fetch origin retrieval
+              git checkout retrieval
               pip install -r programming_runs/requirements.txt
               cd programming_runs
               rm -rf ./root/retrieval
