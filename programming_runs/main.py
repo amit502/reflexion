@@ -376,19 +376,31 @@ def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
     halted_rates     = []
     avg_steps        = []
 
+    # for it in iter_numbers:
+    #     # Cumulative successes at iteration `it`
+    #     num_solved_at_it = sum(1 for s in iter_solved if 0 <= s <= it)
+    #     # Problems still failing at this iteration
+    #     num_failed_at_it = sum(
+    #         1 for i, s in enumerate(iter_solved)
+    #         if s == -1 and iter_counts[i] > it and not halted_flags[i]
+    #     )
+    #     # Problems that halted (no reflections, gave up)
+    #     num_halted_at_it = sum(1 for h in halted_flags if h)
+
+    #     success_rates.append(num_solved_at_it / num_total)
+    #     fail_rates.append(num_failed_at_it / num_total)
+    #     halted_rates.append(num_halted_at_it / num_total)
+
     for it in iter_numbers:
         # Cumulative successes at iteration `it`
         num_solved_at_it = sum(1 for s in iter_solved if 0 <= s <= it)
-        # Problems still failing at this iteration
-        num_failed_at_it = sum(
-            1 for i, s in enumerate(iter_solved)
-            if s == -1 and iter_counts[i] > it and not halted_flags[i]
-        )
-        # Problems that halted (no reflections, gave up)
+        # Halted = gave up after 1 attempt — constant across all iterations
         num_halted_at_it = sum(1 for h in halted_flags if h)
+        # Failed = everything else — guarantees success + fail + halted = 1.0
+        num_failed_at_it = num_total - num_solved_at_it - num_halted_at_it
 
         success_rates.append(num_solved_at_it / num_total)
-        fail_rates.append(num_failed_at_it / num_total)
+        fail_rates.append(max(num_failed_at_it, 0) / num_total)
         halted_rates.append(num_halted_at_it / num_total)
 
         # Avg implementations tried up to this iteration (active problems)
