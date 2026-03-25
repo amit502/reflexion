@@ -22,7 +22,7 @@ class AnyOpenAILLM:
     def __call__(self, prompt: str,system_prompt: str):
         try:
             completion = self.model.chat.completions.create(
-                model="gpt-oss",
+                model="mistralai/Mistral-7B-Instruct-v0.1", #"gpt-oss",
                 temperature=0.0,
                 messages=[
                     {"role": "system", "content": system_prompt},
