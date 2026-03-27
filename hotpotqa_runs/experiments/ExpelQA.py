@@ -7,7 +7,7 @@ root = '../root/'
 
 from util import summarize_react_trial, log_react_trial
 from agents import ReactReflectAgent, ReactAgent, ReflexionStrategy
-from retrieval_agents import ReactReflectAgent as ExpeL_ReactReflectAgent
+#from retrieval_agents import ReactReflectAgent as ExpeL_ReactReflectAgent
 from prompts import REFLECTION_SYSTEM_PROMPT
 from llm import AnyOpenAILLM
 
@@ -53,7 +53,7 @@ print(f"\n=== ExpeL Phase 1: Gathering ({N_GATHER} trials, {N_TOTAL} questions) 
 expel = ExpeL(max_insights=10, retrieval_k=3)
 
 gather_agents = [
-    ExpeL_ReactReflectAgent(row['question'], row['answer'])
+    ReactReflectAgent(row['question'], row['answer'])
     for _, row in hotpot.iterrows()
 ]
 
