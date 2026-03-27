@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: alfworld-expel-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true"
+      containers:
+        - name: reflexion-trainer
+          image: ghcr.io/amit502/reflexion:alf
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/alfworld/expel
+            - name: ALFWORLD_DATA
+              value: /results/alfworld/data
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git checkout main
+              pip uninstall opencv-python
+              pip install opencv-python-headless
+              pip install -r alfworld_runs/requirements.txt
+
+              cd alfworld_runs
+
+              # Run ExpeL — 3 gathering trials + 1 eval trial
+              # Total trials = n_gather(3) + eval(1) = 4
+              python main.py \
+                --num_trials 4 \
+                --num_envs 134 \
+                --run_name expel_run \
+                --strategy expel \
+                --expel_n_gather 3 \
+                --model gpt-oss
+
+              mkdir -p ${RESULTS_PATH}
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/alfworld_runs/expel_run/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results
+            - name: alfworld-data
+              mountPath: /data/alfworld
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: "2"
+            requests:
+              memory: 4Gi
+              cpu: "2"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc
+        - name: alfworld-data
+          persistentVolumeClaim:
+            claimName: alfworld-pvc
+      restartPolicy: Never
+  backoffLimit: 1

@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prog-expel-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true"
+      containers:
+        - name: reflexion-trainer
+          image: ghcr.io/amit502/reflexion:latest
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/prog/expel
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git checkout main
+              pip install -r programming_runs/requirements.txt
+
+              cd programming_runs
+              rm -rf ./root/expel
+
+
+              python main.py \
+                --run_name expel \
+                --root_dir root \
+                --dataset_path ./benchmarks/humaneval-py_hardest50.jsonl \
+                --strategy expel \
+                --language py \
+                --model gpt-oss \
+                --max_iters 10 \
+                --pass_at_k 1 \
+                --verbose
+
+              mkdir -p ${RESULTS_PATH}
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/programming_runs/root/expel/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: "2"
+            requests:
+              memory: 4Gi
+              cpu: "2"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc
+      restartPolicy: Never
+  backoffLimit: 1

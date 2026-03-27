@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hotpot-expel-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true"
+      containers:
+        - name: reflexion-trainer
+          image: ghcr.io/amit502/reflexion:latest
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/expel
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git checkout main
+              pip install -r hotpotqa_runs/requirements.txt
+              cd hotpotqa_runs/experiments
+
+              python ExpelQA.py
+
+              mkdir -p ${RESULTS_PATH}
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/hotpotqa_runs/root/ExpeL/hotpot/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: "2"
+            requests:
+              memory: 4Gi
+              cpu: "2"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc
+      restartPolicy: Never
+  backoffLimit: 1

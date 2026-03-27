@@ -1,0 +1,210 @@
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: llm-server
+#   namespace: kc-ai-research-lab
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: llm-server
+#   template:
+#     metadata:
+#       labels:
+#         app: llm-server
+#     spec:
+#       nodeSelector:
+#         topology.kubernetes.io/region: us-west
+#         nautilus.io/linstor: "true"
+#         nvidia.com/gpu.present: "true"
+
+#       containers:
+#         - name: vllm-server
+#           image: vllm/vllm-openai:latest
+#           env:
+#             - name: HUGGING_FACE_HUB_TOKEN
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: hf-secret
+#                   key: token
+#           ports:
+#             - containerPort: 8000
+
+#           command:
+#             - "python"
+#             - "-m"
+#             - "vllm.entrypoints.openai.api_server"
+
+#           args:
+#             - "--model"
+#             - "mistralai/Mistral-7B-Instruct-v0.1"
+#             - "--download-dir"
+#             - "/models"
+#             - "--dtype"
+#             - "float16"
+#             - "--gpu-memory-utilization"
+#             - "0.85"
+#             - "--max-model-len"
+#             - "4096"
+
+#           volumeMounts:
+#             - name: model-storage
+#               mountPath: /models
+
+#           resources:
+#             requests:
+#               nvidia.com/gpu: 1
+#               memory: 14Gi
+#               cpu: "3"
+#             limits:
+#               nvidia.com/gpu: 1
+#               memory: 16Gi # ≤1.2x ✅
+#               cpu: "3.5" # ≤1.2x ✅
+
+#       volumes:
+#         - name: model-storage
+#           persistentVolumeClaim:
+#             claimName: llm-model-pvc
+
+#       restartPolicy: Never
+
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: llm-server
+#   namespace: kc-ai-research-lab
+# spec:
+#   restartPolicy: Never
+#   containers:
+#     - name: llm-server
+#       image: vllm/vllm-openai:latest
+#       env:
+#         - name: HUGGING_FACE_HUB_TOKEN
+#           valueFrom:
+#             secretKeyRef:
+#               name: hf-secret
+#               key: token
+#       args:
+#         - "--model"
+#         - "mistralai/Mistral-7B-Instruct-v0.1"
+#         - "--download-dir"
+#         - "/models"
+#         - "--dtype"
+#         - "float16"
+#         - "--gpu-memory-utilization"
+#         - "0.5"
+#       resources:
+#         requests:
+#           nvidia.com/gpu: 1
+#           memory: 14Gi
+#           cpu: "3"
+#         limits:
+#           nvidia.com/gpu: 1
+#           memory: 16Gi
+#           cpu: "3"
+#       volumeMounts:
+#         - name: model-storage
+#           mountPath: /models
+#   volumes:
+#     - name: model-storage
+#       persistentVolumeClaim:
+#         claimName: llm-model-pvc
+
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: llm-server
+#   namespace: kc-ai-research-lab
+# spec:
+#   restartPolicy: Never
+#   # nodeSelector:
+#   #   # Select any node with GPU
+#   #   accelerator: nvidia-gpu
+#   containers:
+#     - name: llm-server
+#       image: vllm/vllm-openai:v0.2.2 #vllm/vllm-openai:latest # T4/V100 compatible
+#       env:
+#         - name: HUGGING_FACE_HUB_TOKEN
+#           valueFrom:
+#             secretKeyRef:
+#               name: hf-secret
+#               key: token
+#       args:
+#         - "--model"
+#         - "mistralai/Mistral-7B-Instruct-v0.1"
+#         - "--download-dir"
+#         - "/models"
+#         - "--dtype"
+#         - "float16"
+#       resources:
+#         requests:
+#           nvidia.com/gpu: 1
+#           memory: 14Gi
+#           cpu: "3"
+#         limits:
+#           nvidia.com/gpu: 1
+#           memory: 14Gi
+#           cpu: "3"
+#       volumeMounts:
+#         - name: model-storage
+#           mountPath: /models
+#   volumes:
+#     - name: model-storage
+#       persistentVolumeClaim:
+#         claimName: llm-model-pvc
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: llm-server
+  namespace: kc-ai-research-lab
+  labels:
+    app: llm-server
+spec:
+  restartPolicy: Never
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                  - Tesla-T4
+                  - Tesla-V100
+                  - NVIDIA-GeForce-RTX-3090
+                  - NVIDIA-TITAN-RTX
+  containers:
+    - name: llm-server
+      image: vllm/vllm-openai:latest
+      ports:
+        - containerPort: 8000
+      env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: token
+      args:
+        - "--model"
+        - "mistralai/Mistral-7B-Instruct-v0.1"
+        - "--download-dir"
+        - "/models"
+        - "--dtype"
+        - "float16"
+      resources:
+        requests:
+          nvidia.com/gpu: 1
+          memory: 14Gi
+          cpu: "3"
+        limits:
+          nvidia.com/gpu: 1
+          memory: 14Gi
+          cpu: "3"
+      volumeMounts:
+        - name: model-storage
+          mountPath: /models
+  volumes:
+    - name: model-storage
+      persistentVolumeClaim:
+        claimName: llm-model-pvc
