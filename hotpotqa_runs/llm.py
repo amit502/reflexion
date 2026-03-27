@@ -12,8 +12,8 @@ class AnyOpenAILLM:
         # Determine model type from the kwargs
         model_name = "gpt-oss" # kwargs.get('model_name', 'gpt-3.5-turbo') 
         #if model_name.split('-')[0] == 'text':
-        #*args, **kwargs,       "https://ellm.nrp-nautilus.io/v1"
-        self.model = OpenAI(base_url = "http://llm-service:8000/v1", api_key=os.environ['OPENAI_API_KEY'])
+        #*args, **kwargs,  "http://llm-service:8000/v1"     
+        self.model = OpenAI(base_url = "https://ellm.nrp-nautilus.io/v1", api_key=os.environ['OPENAI_API_KEY'])
         self.model_type = 'completion'
         # else:
         #     self.model = ChatOpenAI(*args, **kwargs, base_url = "https://ellm.nrp-nautilus.io/v1", api_key=os.environ['OPENAI_API_KEY'])
