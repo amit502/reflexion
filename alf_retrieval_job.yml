@@ -32,8 +32,8 @@ spec:
               # Clone your repository
               git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
               cd ${REPO_PATH}
-              # git fetch origin main
-              git checkout main
+              git fetch origin attention
+              git checkout attention
               pip uninstall opencv-python
               pip install opencv-python-headless
               pip install -r alfworld_runs/requirements.txt

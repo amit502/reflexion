@@ -1,11 +1,11 @@
 """
-Programming Agents — mirrors HotpotQA and ALFWorld agents structure.
+Programming Agents — Attention-Weighted Retrieval with Sentence Transformer.
 
 Strategies:
     SIMPLE                         -> Experiment 1: Simple generation (baseline)
     COT_GT                         -> Experiment 2: CoT + docstring context
     REFLEXION                      -> Experiment 3: Standard Reflexion
-    RETRIEVED_TRAJECTORY_REFLEXION -> Experiment 4: Retrieval-augmented Reflexion
+    RETRIEVED_TRAJECTORY_REFLEXION -> Experiment 4: Attention-weighted retrieval
 """
 
 import re
@@ -15,44 +15,25 @@ from enum import Enum
 from typing import List, Tuple, Optional
 
 
-# ---------------------------------------------------------------------------
-# Strategy enum
-# ---------------------------------------------------------------------------
-
 class ReflexionStrategy(Enum):
-    """
-    SIMPLE:                         No reflection, single generation attempt
-    COT_GT:                         CoT with explicit docstring context injection
-    REFLEXION:                      Standard reflexion with self-reflection
-    RETRIEVED_TRAJECTORY_REFLEXION: Retrieve top-k similar past failed problems,
-                                    use as contrastive context for reflection
-    """
     SIMPLE                         = 'simple'
     COT_GT                         = 'cot_gt'
     REFLEXION                      = 'reflexion'
     RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
 
 
-# ---------------------------------------------------------------------------
-# Programming error taxonomy
-# ---------------------------------------------------------------------------
-
 PROGRAMMING_ERROR_TAXONOMY = [
-    "WRONG_ALGORITHM",       # fundamentally wrong approach
-    "EDGE_CASE_MISSING",     # fails on empty input, zero, negative numbers etc.
-    "OFF_BY_ONE",            # index/boundary error
-    "WRONG_DATA_STRUCTURE",  # used wrong data structure
-    "LOGIC_ERROR",           # correct approach but wrong logic
-    "TYPE_ERROR",            # wrong type handling
-    "TIMEOUT",               # correct but too slow
-    "SYNTAX_ERROR",          # code doesn't parse
+    "WRONG_ALGORITHM",
+    "EDGE_CASE_MISSING",
+    "OFF_BY_ONE",
+    "WRONG_DATA_STRUCTURE",
+    "LOGIC_ERROR",
+    "TYPE_ERROR",
+    "TIMEOUT",
+    "SYNTAX_ERROR",
     "UNKNOWN",
 ]
 
-
-# ---------------------------------------------------------------------------
-# CoT + GT context helpers (Experiment 2)
-# ---------------------------------------------------------------------------
 
 PY_COT_GT_INSTRUCTION = """You are an AI Python assistant. You will be given a function signature and docstring.
 Before writing code, reason step by step about:
@@ -66,20 +47,12 @@ Use a Python code block to write your response. For example:
 print('Hello world!')
 ```"""
 
-def build_cot_gt_prompt(func_sig: str) -> str:
-    """
-    Build a CoT+GT prompt by extracting the docstring as structured context
-    and prepending explicit reasoning instructions.
 
-    Analogous to HotpotQA CoT+GT where ground truth passage is given —
-    here the docstring IS the ground truth specification.
-    """
-    # Extract docstring if present
+def build_cot_gt_prompt(func_sig: str) -> str:
     docstring = ""
     match = re.search(r'"""(.*?)"""', func_sig, re.DOTALL)
     if match:
         docstring = match.group(1).strip()
-
     if docstring:
         context = (
             f"Function specification (ground truth):\n{docstring}\n\n"
@@ -90,7 +63,7 @@ def build_cot_gt_prompt(func_sig: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TrajectoryRecord + TrajectoryStore (Programming-adapted)
+# TrajectoryRecord — with lazy sentence transformer embedding
 # ---------------------------------------------------------------------------
 
 class TrajectoryRecord:
@@ -103,44 +76,68 @@ class TrajectoryRecord:
                  reflection: str,
                  success: bool,
                  error_class: str = "UNKNOWN"):
-        self.func_sig       = func_sig        # function signature + docstring
-        self.implementation = implementation  # the generated code
-        self.feedback       = feedback        # test feedback
-        self.reflection     = reflection      # self-reflection text
+        self.func_sig       = func_sig
+        self.implementation = implementation
+        self.feedback       = feedback
+        self.reflection     = reflection
         self.success        = success
         self.error_class    = error_class
+        self._embedding: Optional[np.ndarray] = None
 
     def embedding_text(self) -> str:
-        """Text used for similarity — function signature is the key signal."""
         return self.func_sig
 
+    def embedding(self, embed_fn) -> np.ndarray:
+        """Lazy embedding — computed once on first access."""
+        if self._embedding is None:
+            self._embedding = embed_fn(self.func_sig)
+        return self._embedding
+
+
+# ---------------------------------------------------------------------------
+# TrajectoryStore — sentence transformer + attention-weighted retrieval
+# ---------------------------------------------------------------------------
 
 class TrajectoryStore:
     """
     Episodic memory of past programming trajectories.
 
-    Retrieval scoring:
-        score = λ_q   * sim(func_sig_i, func_sig_curr)  # semantic similarity
-              + λ_err * (error_class_i == error_class_curr)  # same failure mode
+    Retrieval uses Attention-Weighted Selection with sentence transformer:
 
-    Uses edit distance similarity — no heavy dependencies.
-    MMR applied for diversity, balanced between failures and successes.
+        logit_i = (q·k_i / sqrt(d) + error_bonus_i) / tau
+
+        alpha_i = softmax(logit_i)
+
+    where:
+        q     = sentence transformer embedding of current func_sig
+        k_i   = sentence transformer embedding of stored func_sig
+        error_bonus = 0.5 if same error class, else 0.0
+        tau   = adaptive temperature (0.05 sparse → 0.3 rich store)
+
+    Adaptive tau prevents noise injection in early iterations when store
+    is sparse — sharp selection (low tau) avoids injecting irrelevant context.
+    MMR applied within failure/success pools for diversity.
     """
 
+    _st_model = None  # class-level cache
+
     def __init__(self,
-                 lambda_q:   float = 0.7,
-                 lambda_err: float = 0.3,
+                 tau: float = 0.1,
+                 adaptive_tau: bool = True,
+                 error_bonus: float = 0.5,
                  mmr_lambda: float = 0.5):
-        self.records:    List[TrajectoryRecord] = []
-        self.lambda_q    = lambda_q
-        self.lambda_err  = lambda_err
-        self.mmr_lambda  = mmr_lambda
+        self.records:      List[TrajectoryRecord] = []
+        self.embed_fn      = self._sentence_transformer_embed
+        self.tau           = tau
+        self.adaptive_tau  = adaptive_tau
+        self.error_bonus   = error_bonus
+        self.mmr_lambda    = mmr_lambda
 
     def add(self, record: TrajectoryRecord) -> None:
         self.records.append(record)
 
     def retrieve(self,
-                 func_sig:   str,
+                 func_sig:    str,
                  error_class: str,
                  k:               int = 3,
                  max_failures:    int = 2,
@@ -148,17 +145,38 @@ class TrajectoryStore:
         if not self.records:
             return []
 
-        scored: List[Tuple[float, TrajectoryRecord]] = []
-        for rec in self.records:
-            sim_q   = self._text_similarity(func_sig, rec.func_sig)
-            sim_err = float(rec.error_class == error_class)
-            score   = self.lambda_q * sim_q + self.lambda_err * sim_err
-            scored.append((score, rec))
+        q_emb = self.embed_fn(func_sig)
+        d     = q_emb.shape[0]
 
+        # ── Adaptive temperature ─────────────────────────────────────────────
+        if self.adaptive_tau:
+            n   = len(self.records)
+            tau = 0.05 + 0.25 * min(n / 100.0, 1.0)
+        else:
+            tau = self.tau
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Compute attention logits ─────────────────────────────────────────
+        # logit_i = (q·k_i / sqrt(d) + error_bonus_i) / tau
+        logits = []
+        for rec in self.records:
+            k_emb = rec.embedding(self.embed_fn)
+            dot   = float(np.dot(q_emb, k_emb)) / np.sqrt(d)
+            bonus = self.error_bonus if rec.error_class == error_class else 0.0
+            logits.append((dot + bonus) / tau)
+
+        # Softmax with numerical stability
+        logits_arr  = np.array(logits)
+        logits_arr -= logits_arr.max()
+        exp_logits  = np.exp(logits_arr)
+        alphas      = exp_logits / exp_logits.sum()
+        # ─────────────────────────────────────────────────────────────────────
+
+        scored = list(zip(alphas.tolist(), self.records))
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        failures  = [(s, r) for s, r in scored if not r.success]
-        successes = [(s, r) for s, r in scored if r.success]
+        failures  = [(a, r) for a, r in scored if not r.success]
+        successes = [(a, r) for a, r in scored if r.success]
 
         selected_failures  = self._mmr_select(failures,  max_failures)
         selected_successes = self._mmr_select(successes, max_successes)
@@ -170,35 +188,50 @@ class TrajectoryStore:
                     k: int) -> List[TrajectoryRecord]:
         if not scored:
             return []
-        selected: List[TrajectoryRecord] = []
+        selected   = []
         candidates = list(scored)
         while len(selected) < k and candidates:
             if not selected:
                 _, best = max(candidates, key=lambda x: x[0])
             else:
                 best_score = -1e9
-                best = None
-                for rel_score, rec in candidates:
+                best       = None
+                sel_embs   = [r.embedding(self.embed_fn) for r in selected]
+                for attn_score, rec in candidates:
                     max_sim = max(
-                        self._text_similarity(rec.func_sig, s.func_sig)
-                        for s in selected
+                        float(np.dot(rec.embedding(self.embed_fn), se))
+                        for se in sel_embs
                     )
-                    mmr = (self.mmr_lambda * rel_score
+                    mmr = (self.mmr_lambda * attn_score
                            - (1 - self.mmr_lambda) * max_sim)
                     if mmr > best_score:
                         best_score = mmr
-                        best = rec
+                        best       = rec
             selected.append(best)
-            candidates = [(s, r) for s, r in candidates if r is not best]
+            candidates = [(a, r) for a, r in candidates if r is not best]
         return selected
 
+    @staticmethod
+    def _get_st_model():
+        if TrajectoryStore._st_model is None:
+            from sentence_transformers import SentenceTransformer
+            TrajectoryStore._st_model = SentenceTransformer('all-MiniLM-L6-v2')
+        return TrajectoryStore._st_model
+
+    @staticmethod
+    def _sentence_transformer_embed(text: str) -> np.ndarray:
+        model = TrajectoryStore._get_st_model()
+        vec   = model.encode(text, normalize_embeddings=True)
+        return vec.astype(np.float64)
+
+    # Keep for backward compatibility
     @staticmethod
     def _text_similarity(a: str, b: str) -> float:
         return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
 # ---------------------------------------------------------------------------
-# Prompt helpers for retrieval-augmented reflection
+# Prompt helpers (unchanged)
 # ---------------------------------------------------------------------------
 
 RETRIEVAL_REFLECTION_HEADER = """\
@@ -213,10 +246,11 @@ Write a concise, actionable reflection for the CURRENT implementation ONLY.
 
 """
 
+
 def format_retrieved_trajectories(records: List[TrajectoryRecord]) -> str:
     if not records:
         return ''
-    lines = []
+    lines     = []
     successes = [r for r in records if r.success]
     failures  = [r for r in records if not r.success]
 
@@ -244,10 +278,6 @@ def classify_programming_error(func_sig: str,
                                 implementation: str,
                                 feedback: str,
                                 llm_fn) -> str:
-    """
-    Ask the LLM to classify the programming failure into one of the known error types.
-    llm_fn: callable(prompt: str) -> str
-    """
     prompt = (
         "Classify the following failed Python implementation into exactly ONE of these error types:\n"
         f"{', '.join(PROGRAMMING_ERROR_TAXONOMY)}\n\n"
@@ -269,7 +299,6 @@ def build_retrieval_reflection_prompt(func_sig: str,
                                        error_class: str,
                                        retrieved: List[TrajectoryRecord]) -> str:
     retrieved_context = format_retrieved_trajectories(retrieved)
-
     current_block = (
         "\n=== CURRENT FAILED IMPLEMENTATION ===\n"
         f"Error class: {error_class}\n\n"
@@ -277,7 +306,6 @@ def build_retrieval_reflection_prompt(func_sig: str,
         f"Implementation:\n{implementation[:500].strip()}\n\n"
         f"Test feedback:\n{feedback[:300].strip()}\n"
     )
-
     instruction = (
         "\nWrite a reflection for the CURRENT FAILED IMPLEMENTATION in EXACTLY this format:\n\n"
         "FAILED_STEP: <what specifically went wrong in the implementation>\n"
@@ -285,5 +313,4 @@ def build_retrieval_reflection_prompt(func_sig: str,
         "WHAT_TO_DO_DIFFERENTLY: <exact change to make in the next implementation>\n"
         "GENERALISATION: <one sentence on when this fix applies beyond this exact problem>\n"
     )
-
     return RETRIEVAL_REFLECTION_HEADER + retrieved_context + current_block + instruction
