@@ -9,9 +9,9 @@ from immediate_reflexion import run_immediate_reflexion
 from simple import run_simple
 from reflexion import run_reflexion
 from cot_gt import run_cot_gt
-from retrieval_reflexion import run_retrieval_reflexion
+from retrieval_reflexion_tapas import run_retrieval_reflexion
 from test_acc import run_test_acc
-from programming_agents import TrajectoryStore
+from programming_agents_tapas import TrajectoryStore
 from utils import read_jsonl, read_jsonl_gz
 
 import sys
