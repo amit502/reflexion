@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: alfworld-tapas-job
+  namespace: kc-ai-research-lab
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-west
+        nautilus.io/linstor: "true"
+      containers:
+        - name: reflexion-trainer
+          image: ghcr.io/amit502/reflexion:alf
+          env:
+            - name: REPO_PATH
+              value: /app/reflexion
+            - name: RESULTS_PATH
+              value: /results/alfworld/tapas
+            - name: ALFWORLD_DATA
+              value: /results/alfworld/data
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: api-key
+          command:
+            - "bash"
+            - "-c"
+          args:
+            - |
+              git clone https://github.com/amit502/reflexion.git ${REPO_PATH}
+              cd ${REPO_PATH}
+              git checkout main
+              pip uninstall opencv-python
+              pip install opencv-python-headless
+              pip install -r alfworld_runs/requirements.txt
+
+              cd alfworld_runs
+
+              python tapas_main.py \
+                --num_trials 10 \
+                --num_envs 134 \
+                --run_name tapas_run \
+                --strategy tapas \
+                --model gpt-oss
+
+              mkdir -p ${RESULTS_PATH}
+              echo "Copying results to PVC..."
+              cp -r ${REPO_PATH}/alfworld_runs/tapas_run/ ${RESULTS_PATH}/
+              echo "Results saved to PVC!"
+              echo "Job complete!"
+          volumeMounts:
+            - name: git-repo
+              mountPath: /app
+            - name: results-volume
+              mountPath: /results
+          resources:
+            limits:
+              memory: 2Gi
+              cpu: "1"
+            requests:
+              memory: 2Gi
+              cpu: "1"
+      volumes:
+        - name: git-repo
+          emptyDir: {}
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: reflexion-data-pvc
+      restartPolicy: Never
+  backoffLimit: 1
