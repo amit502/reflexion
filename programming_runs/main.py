@@ -615,6 +615,355 @@
 
 
 
+# import os
+# import json
+# import argparse
+# import numpy as np
+# import matplotlib.pyplot as plt
+
+# from immediate_refinement import run_immediate_refinement
+# from immediate_reflexion import run_immediate_reflexion
+# from simple import run_simple
+# from reflexion import run_reflexion
+# from cot_gt import run_cot_gt
+# from retrieval_reflexion import run_retrieval_reflexion
+# from test_acc import run_test_acc
+# from programming_agents import TrajectoryStore
+# from utils import read_jsonl, read_jsonl_gz
+
+# # ── ExpeL imports ────────────────────────────────────────────────────────────
+# import sys
+# sys.path.append('..')
+# from expel_store import ExpeL
+# from expel_programming import run_expel_gather, run_expel_extract_insights, run_expel_eval
+# # ─────────────────────────────────────────────────────────────────────────────
+
+# from typing import List, Dict
+
+
+# def get_args():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--run_name",        type=str)
+#     parser.add_argument("--root_dir",        type=str, default="root")
+#     parser.add_argument("--dataset_path",    type=str, default="root")
+#     parser.add_argument("--strategy",        type=str,
+#                         help="`simple`, `cot_gt`, `reflexion`, `retrieval`, `expel`")
+#     parser.add_argument("--language",        type=str)
+#     parser.add_argument("--model",           type=str)
+#     parser.add_argument("--pass_at_k",       type=int, default=1)
+#     parser.add_argument("--max_iters",       type=int, default=10)
+#     parser.add_argument("--expansion_factor",type=int, default=3)
+#     parser.add_argument("--is_leetcode",     action='store_true')
+#     parser.add_argument("--verbose",         action='store_true')
+#     args = parser.parse_args()
+#     return args
+
+
+# def strategy_factory(strategy: str):
+#     def kwargs_wrapper_gen(func, delete_keys=[]):
+#         def kwargs_wrapper(**kwargs):
+#             for key in delete_keys:
+#                 del kwargs[key]
+#             return func(**kwargs)
+#         return kwargs_wrapper
+
+#     if strategy == "simple":
+#         return kwargs_wrapper_gen(run_simple,
+#                    delete_keys=["expansion_factor", "trajectory_store"])
+#     elif strategy == "cot_gt":
+#         return kwargs_wrapper_gen(run_cot_gt,
+#                    delete_keys=["expansion_factor", "trajectory_store"])
+#     elif strategy == "reflexion":
+#         return kwargs_wrapper_gen(run_reflexion,
+#                    delete_keys=["expansion_factor", "trajectory_store"])
+#     elif strategy == "retrieval":
+#         return kwargs_wrapper_gen(run_retrieval_reflexion,
+#                    delete_keys=["expansion_factor"])
+#     elif strategy == "immediate-reflexion":
+#         return kwargs_wrapper_gen(run_immediate_reflexion,
+#                    delete_keys=["expansion_factor", "trajectory_store"])
+#     elif strategy == "immediate-refinement":
+#         return kwargs_wrapper_gen(run_immediate_refinement,
+#                    delete_keys=["expansion_factor", "trajectory_store"])
+#     elif strategy == "test-acc":
+#         return kwargs_wrapper_gen(run_test_acc,
+#                    delete_keys=["expansion_factor", "max_iters", "trajectory_store"])
+#     elif strategy == "expel":
+#         # ExpeL is self-contained — handles gather + extract + eval internally
+#         # Returns a no-op so main() can call it via run_strategy() uniformly
+#         def expel_noop(**kwargs):
+#             pass   # all logic handled in main() below
+#         return expel_noop
+#     else:
+#         raise ValueError(f"Strategy `{strategy}` is not supported")
+
+
+# # ---------------------------------------------------------------------------
+# # Per-iteration metrics (unchanged)
+# # ---------------------------------------------------------------------------
+
+# def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
+#     if not os.path.exists(log_path):
+#         return {}
+#     items = read_jsonl(log_path)
+#     if not items:
+#         return {}
+#     num_total    = len(items)
+#     iter_solved  = []
+#     iter_counts  = []
+#     halted_flags = []
+#     for item in items:
+#         impls       = item.get("implementations", [])
+#         reflections = item.get("reflections", [])
+#         is_solved   = item.get("is_solved", False)
+#         num_impls   = len(impls) if impls else 1
+#         iter_counts.append(num_impls)
+#         halted = not is_solved and len(reflections) == 0
+#         halted_flags.append(halted)
+#         if is_solved:
+#             iter_solved.append(num_impls - 1)
+#         else:
+#             iter_solved.append(-1)
+
+#     iter_numbers  = list(range(max_iters))
+#     success_rates = []
+#     fail_rates    = []
+#     halted_rates  = []
+#     avg_steps     = []
+#     for it in iter_numbers:
+#         num_solved_at_it = sum(1 for s in iter_solved if 0 <= s <= it)
+#         num_halted_at_it = sum(1 for h in halted_flags if h)
+#         num_failed_at_it = num_total - num_solved_at_it - num_halted_at_it
+#         success_rates.append(num_solved_at_it / num_total)
+#         fail_rates.append(max(num_failed_at_it, 0) / num_total)
+#         halted_rates.append(num_halted_at_it / num_total)
+#         active_counts = [min(c, it + 1) for c in iter_counts]
+#         avg_steps.append(float(np.mean(active_counts)))
+
+#     return {
+#         "iter_numbers":  iter_numbers,
+#         "success_rates": success_rates,
+#         "fail_rates":    fail_rates,
+#         "halted_rates":  halted_rates,
+#         "avg_steps":     avg_steps,
+#         "total":         num_total,
+#         "solved":        sum(1 for s in iter_solved if s >= 0),
+#         "failed":        sum(1 for i, s in enumerate(iter_solved)
+#                              if s == -1 and not halted_flags[i]),
+#         "halted":        sum(1 for h in halted_flags if h),
+#         "pass_at_1":     round(sum(1 for s in iter_solved if s >= 0) / num_total, 4),
+#         "avg_iters":     round(float(np.mean(iter_counts)), 2),
+#         "avg_reflections": round(float(np.mean([
+#             len(item.get("reflections", [])) for item in items
+#             if not item.get("is_solved", False)
+#         ])) if any(not item.get("is_solved", False) for item in items) else 0.0, 2),
+#     }
+
+
+# # ---------------------------------------------------------------------------
+# # Plotting (unchanged)
+# # ---------------------------------------------------------------------------
+
+# def save_plots(metrics, log_dir, run_name, num_problems):
+#     iter_numbers  = metrics.get("iter_numbers",  [])
+#     success_rates = metrics.get("success_rates", [])
+#     fail_rates    = metrics.get("fail_rates",    [])
+#     halted_rates  = metrics.get("halted_rates",  [])
+#     avg_steps     = metrics.get("avg_steps",     [])
+#     if not iter_numbers:
+#         return
+
+#     plt.figure(figsize=(8, 5))
+#     plt.plot(iter_numbers, success_rates, marker='o', linewidth=2,
+#              markersize=6, color='steelblue')
+#     plt.xlabel('Iteration Number'); plt.ylabel('Success Rate')
+#     plt.title(f'Success Rate per Iteration — {run_name}')
+#     plt.xticks(iter_numbers); plt.ylim(0, 1)
+#     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
+#     plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_success_rate.png'), dpi=150)
+#     plt.close()
+
+#     plt.figure(figsize=(8, 5))
+#     plt.plot(iter_numbers, fail_rates,   marker='s', linewidth=2,
+#              markersize=6, color='tomato',     label='Fail Rate')
+#     plt.plot(iter_numbers, halted_rates, marker='^', linewidth=2,
+#              markersize=6, color='darkorange', label='Halted Rate')
+#     plt.xlabel('Iteration Number'); plt.ylabel('Rate')
+#     plt.title(f'Failed vs Halted Rate — {run_name}')
+#     plt.xticks(iter_numbers); plt.ylim(0, 1); plt.legend()
+#     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
+#     plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_fail_halted.png'), dpi=150)
+#     plt.close()
+
+#     plt.figure(figsize=(8, 5))
+#     plt.plot(iter_numbers, avg_steps, marker='D', linewidth=2,
+#              markersize=6, color='mediumseagreen')
+#     plt.xlabel('Iteration Number'); plt.ylabel('Avg Implementations Tried')
+#     plt.title(f'Avg Implementations — {run_name}')
+#     plt.xticks(iter_numbers)
+#     plt.ylim(0, max(avg_steps) * 1.2 if avg_steps else 10)
+#     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
+#     plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_avg_steps.png'), dpi=150)
+#     plt.close()
+#     print(f"Plots saved to {log_dir}")
+
+
+# def save_metrics_csv(metrics, log_dir, run_name, num_problems):
+#     csv_path = os.path.join(log_dir, f'{num_problems}_problems_metrics.csv')
+#     with open(csv_path, 'w') as f:
+#         f.write('Iteration,SuccessRate,FailRate,HaltedRate,AvgSteps\n')
+#         for it, s, fa, h, st in zip(
+#             metrics["iter_numbers"], metrics["success_rates"],
+#             metrics["fail_rates"],   metrics["halted_rates"],
+#             metrics["avg_steps"],
+#         ):
+#             f.write(f'{it},{s:.4f},{fa:.4f},{h:.4f},{st:.4f}\n')
+#     print(f"Metrics CSV saved to {csv_path}")
+
+
+# def save_metrics_json(metrics, log_dir, run_name):
+#     metrics_path = os.path.join(log_dir, f"{run_name}_metrics.json")
+#     summary = {k: v for k, v in metrics.items()
+#                if k not in ("iter_numbers", "success_rates", "fail_rates",
+#                              "halted_rates", "avg_steps")}
+#     with open(metrics_path, 'w') as f:
+#         json.dump(summary, f, indent=4)
+#     print(f"Metrics JSON saved to {metrics_path}")
+
+
+# # ---------------------------------------------------------------------------
+# # Main
+# # ---------------------------------------------------------------------------
+
+# def main(args):
+#     if not os.path.exists(args.root_dir):
+#         os.makedirs(args.root_dir)
+
+#     dataset_name = os.path.basename(args.dataset_path).replace("jsonl", "")
+#     log_dir  = os.path.join(args.root_dir, args.run_name)
+#     log_path = os.path.join(
+#         log_dir,
+#         f"{dataset_name}_{args.strategy}_{args.max_iters}_{args.model}"
+#         f"_pass_at_k_{args.pass_at_k}_{args.language}.jsonl"
+#     )
+#     if not os.path.exists(log_dir):
+#         os.makedirs(log_dir)
+
+#     print(f"""
+# -----
+# Starting run:
+#   Strategy:  {args.strategy}
+#   Model:     {args.model}
+#   Language:  {args.language}
+#   Pass@k:    {args.pass_at_k}
+#   Max iters: {args.max_iters}
+#   Dataset:   {args.dataset_path}
+#   Logs:      {log_dir}
+# -----
+# """)
+
+#     print('Loading the dataset...')
+#     if args.dataset_path.endswith(".jsonl"):
+#         dataset = read_jsonl(args.dataset_path)
+#     elif args.dataset_path.endswith(".jsonl.gz"):
+#         dataset = read_jsonl_gz(args.dataset_path)
+#     else:
+#         raise ValueError(f"Dataset path `{args.dataset_path}` is not supported")
+#     print(f"Loaded {len(dataset)} examples")
+
+#     trajectory_store = TrajectoryStore() if args.strategy == "retrieval" else None
+
+#     try:
+#         # ── ExpeL: self-contained two-phase run ──────────────────────────────
+#         if args.strategy == "expel":
+#             expel      = ExpeL(max_insights=10, retrieval_k=3)
+#             gather_log = log_path.replace('.jsonl', '_gather.jsonl')
+
+#             # Phase 1 — gather
+#             print("\n=== ExpeL Phase 1: Gathering ===")
+#             run_expel_gather(
+#                 dataset=dataset,
+#                 model_name=args.model,
+#                 language=args.language,
+#                 max_iters=args.max_iters,
+#                 pass_at_k=args.pass_at_k,
+#                 log_path=gather_log,
+#                 verbose=args.verbose,
+#                 expel=expel,
+#                 is_leetcode=args.is_leetcode,
+#             )
+
+#             # Phase 2 — extract insights
+#             print("\n=== ExpeL Phase 2: Extracting Insights ===")
+#             run_expel_extract_insights(expel, args.model)  # ← fixed
+
+#             # Phase 3 — eval (clear log first so gather results don't pollute)
+#             print("\n=== ExpeL Phase 3: Evaluation ===")
+#             if os.path.exists(log_path):
+#                 os.remove(log_path)
+#             import copy
+#             eval_dataset = copy.deepcopy(dataset)
+#             for item in eval_dataset:
+#                 item['is_solved'] = False  # reset so eval attempts all problems
+#             run_expel_eval(
+#                 dataset=eval_dataset,
+#                 model_name=args.model,
+#                 language=args.language,
+#                 pass_at_k=args.pass_at_k,
+#                 log_path=log_path,
+#                 verbose=args.verbose,
+#                 expel=expel,
+#                 is_leetcode=args.is_leetcode,
+#             )
+
+#         # ── All other strategies ─────────────────────────────────────────────
+#         else:
+#             run_strategy = strategy_factory(args.strategy)
+#             run_strategy(
+#                 dataset=dataset,
+#                 model_name=args.model,
+#                 language=args.language,
+#                 max_iters=args.max_iters,
+#                 pass_at_k=args.pass_at_k,
+#                 log_path=log_path,
+#                 verbose=args.verbose,
+#                 expansion_factor=args.expansion_factor,
+#                 is_leetcode=args.is_leetcode,
+#                 trajectory_store=trajectory_store,
+#             )
+
+#     except Exception as e:
+#         print(f"Run failed: {e}")
+#         import traceback; traceback.print_exc()
+
+#     finally:
+#         if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+#             metrics = compute_per_iter_metrics(log_path, args.max_iters)
+#         else:
+#             metrics = {}
+#         if metrics:
+#             num_problems = metrics["total"]
+#             print(f"\n--- Results for {args.strategy} ---")
+#             print(f"  Pass@1:          {metrics['pass_at_1']:.2%}")
+#             print(f"  Solved:          {metrics['solved']}/{metrics['total']}")
+#             print(f"  Failed:          {metrics['failed']}/{metrics['total']}")
+#             print(f"  Halted:          {metrics['halted']}/{metrics['total']}")
+#             print(f"  Avg iterations:  {metrics['avg_iters']}")
+#             print(f"  Avg reflections: {metrics['avg_reflections']}")
+#             save_metrics_json(metrics, log_dir, args.run_name)
+#             save_metrics_csv(metrics, log_dir, args.run_name, num_problems)
+#             save_plots(metrics, log_dir, args.run_name, num_problems)
+#         else:
+#             print("No results to save yet.")
+
+#     print(f"Done! Logs in `{log_path}`")
+
+
+# if __name__ == "__main__":
+#     args = get_args()
+#     main(args)
+
+
 import os
 import json
 import argparse
@@ -631,32 +980,28 @@ from test_acc import run_test_acc
 from programming_agents import TrajectoryStore
 from utils import read_jsonl, read_jsonl_gz
 
-# ── ExpeL imports ────────────────────────────────────────────────────────────
 import sys
 sys.path.append('..')
 from expel_store import ExpeL
 from expel_programming import run_expel_gather, run_expel_extract_insights, run_expel_eval
-# ─────────────────────────────────────────────────────────────────────────────
 
 from typing import List, Dict
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_name",        type=str)
-    parser.add_argument("--root_dir",        type=str, default="root")
-    parser.add_argument("--dataset_path",    type=str, default="root")
-    parser.add_argument("--strategy",        type=str,
-                        help="`simple`, `cot_gt`, `reflexion`, `retrieval`, `expel`")
-    parser.add_argument("--language",        type=str)
-    parser.add_argument("--model",           type=str)
-    parser.add_argument("--pass_at_k",       type=int, default=1)
-    parser.add_argument("--max_iters",       type=int, default=10)
-    parser.add_argument("--expansion_factor",type=int, default=3)
-    parser.add_argument("--is_leetcode",     action='store_true')
-    parser.add_argument("--verbose",         action='store_true')
-    args = parser.parse_args()
-    return args
+    parser.add_argument("--run_name",         type=str)
+    parser.add_argument("--root_dir",         type=str, default="root")
+    parser.add_argument("--dataset_path",     type=str, default="root")
+    parser.add_argument("--strategy",         type=str)
+    parser.add_argument("--language",         type=str)
+    parser.add_argument("--model",            type=str)
+    parser.add_argument("--pass_at_k",        type=int, default=1)
+    parser.add_argument("--max_iters",        type=int, default=10)
+    parser.add_argument("--expansion_factor", type=int, default=3)
+    parser.add_argument("--is_leetcode",      action='store_true')
+    parser.add_argument("--verbose",          action='store_true')
+    return parser.parse_args()
 
 
 def strategy_factory(strategy: str):
@@ -668,39 +1013,25 @@ def strategy_factory(strategy: str):
         return kwargs_wrapper
 
     if strategy == "simple":
-        return kwargs_wrapper_gen(run_simple,
-                   delete_keys=["expansion_factor", "trajectory_store"])
+        return kwargs_wrapper_gen(run_simple,             delete_keys=["expansion_factor", "trajectory_store"])
     elif strategy == "cot_gt":
-        return kwargs_wrapper_gen(run_cot_gt,
-                   delete_keys=["expansion_factor", "trajectory_store"])
+        return kwargs_wrapper_gen(run_cot_gt,             delete_keys=["expansion_factor", "trajectory_store"])
     elif strategy == "reflexion":
-        return kwargs_wrapper_gen(run_reflexion,
-                   delete_keys=["expansion_factor", "trajectory_store"])
+        return kwargs_wrapper_gen(run_reflexion,          delete_keys=["expansion_factor", "trajectory_store"])
     elif strategy == "retrieval":
-        return kwargs_wrapper_gen(run_retrieval_reflexion,
-                   delete_keys=["expansion_factor"])
+        return kwargs_wrapper_gen(run_retrieval_reflexion,delete_keys=["expansion_factor"])
     elif strategy == "immediate-reflexion":
-        return kwargs_wrapper_gen(run_immediate_reflexion,
-                   delete_keys=["expansion_factor", "trajectory_store"])
+        return kwargs_wrapper_gen(run_immediate_reflexion, delete_keys=["expansion_factor", "trajectory_store"])
     elif strategy == "immediate-refinement":
-        return kwargs_wrapper_gen(run_immediate_refinement,
-                   delete_keys=["expansion_factor", "trajectory_store"])
+        return kwargs_wrapper_gen(run_immediate_refinement,delete_keys=["expansion_factor", "trajectory_store"])
     elif strategy == "test-acc":
-        return kwargs_wrapper_gen(run_test_acc,
-                   delete_keys=["expansion_factor", "max_iters", "trajectory_store"])
+        return kwargs_wrapper_gen(run_test_acc,           delete_keys=["expansion_factor", "max_iters", "trajectory_store"])
     elif strategy == "expel":
-        # ExpeL is self-contained — handles gather + extract + eval internally
-        # Returns a no-op so main() can call it via run_strategy() uniformly
-        def expel_noop(**kwargs):
-            pass   # all logic handled in main() below
+        def expel_noop(**kwargs): pass
         return expel_noop
     else:
         raise ValueError(f"Strategy `{strategy}` is not supported")
 
-
-# ---------------------------------------------------------------------------
-# Per-iteration metrics (unchanged)
-# ---------------------------------------------------------------------------
 
 def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
     if not os.path.exists(log_path):
@@ -720,10 +1051,7 @@ def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
         iter_counts.append(num_impls)
         halted = not is_solved and len(reflections) == 0
         halted_flags.append(halted)
-        if is_solved:
-            iter_solved.append(num_impls - 1)
-        else:
-            iter_solved.append(-1)
+        iter_solved.append(num_impls - 1 if is_solved else -1)
 
     iter_numbers  = list(range(max_iters))
     success_rates = []
@@ -731,14 +1059,13 @@ def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
     halted_rates  = []
     avg_steps     = []
     for it in iter_numbers:
-        num_solved_at_it = sum(1 for s in iter_solved if 0 <= s <= it)
-        num_halted_at_it = sum(1 for h in halted_flags if h)
-        num_failed_at_it = num_total - num_solved_at_it - num_halted_at_it
-        success_rates.append(num_solved_at_it / num_total)
-        fail_rates.append(max(num_failed_at_it, 0) / num_total)
-        halted_rates.append(num_halted_at_it / num_total)
-        active_counts = [min(c, it + 1) for c in iter_counts]
-        avg_steps.append(float(np.mean(active_counts)))
+        num_solved  = sum(1 for s in iter_solved if 0 <= s <= it)
+        num_halted  = sum(1 for h in halted_flags if h)
+        num_failed  = num_total - num_solved - num_halted
+        success_rates.append(num_solved / num_total)
+        fail_rates.append(max(num_failed, 0) / num_total)
+        halted_rates.append(num_halted / num_total)
+        avg_steps.append(float(np.mean([min(c, it + 1) for c in iter_counts])))
 
     return {
         "iter_numbers":  iter_numbers,
@@ -748,8 +1075,7 @@ def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
         "avg_steps":     avg_steps,
         "total":         num_total,
         "solved":        sum(1 for s in iter_solved if s >= 0),
-        "failed":        sum(1 for i, s in enumerate(iter_solved)
-                             if s == -1 and not halted_flags[i]),
+        "failed":        sum(1 for i, s in enumerate(iter_solved) if s == -1 and not halted_flags[i]),
         "halted":        sum(1 for h in halted_flags if h),
         "pass_at_1":     round(sum(1 for s in iter_solved if s >= 0) / num_total, 4),
         "avg_iters":     round(float(np.mean(iter_counts)), 2),
@@ -760,11 +1086,7 @@ def compute_per_iter_metrics(log_path: str, max_iters: int) -> Dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Plotting (unchanged)
-# ---------------------------------------------------------------------------
-
-def save_plots(metrics, log_dir, run_name, num_problems):
+def save_plots(metrics, log_dir, run_name, num_problems, suffix=''):
     iter_numbers  = metrics.get("iter_numbers",  [])
     success_rates = metrics.get("success_rates", [])
     fail_rates    = metrics.get("fail_rates",    [])
@@ -774,42 +1096,37 @@ def save_plots(metrics, log_dir, run_name, num_problems):
         return
 
     plt.figure(figsize=(8, 5))
-    plt.plot(iter_numbers, success_rates, marker='o', linewidth=2,
-             markersize=6, color='steelblue')
+    plt.plot(iter_numbers, success_rates, marker='o', linewidth=2, markersize=6, color='steelblue')
     plt.xlabel('Iteration Number'); plt.ylabel('Success Rate')
-    plt.title(f'Success Rate per Iteration — {run_name}')
+    plt.title(f'Success Rate — {run_name}{suffix}')
     plt.xticks(iter_numbers); plt.ylim(0, 1)
     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
-    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_success_rate.png'), dpi=150)
+    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_success_rate{suffix}.png'), dpi=150)
     plt.close()
 
     plt.figure(figsize=(8, 5))
-    plt.plot(iter_numbers, fail_rates,   marker='s', linewidth=2,
-             markersize=6, color='tomato',     label='Fail Rate')
-    plt.plot(iter_numbers, halted_rates, marker='^', linewidth=2,
-             markersize=6, color='darkorange', label='Halted Rate')
+    plt.plot(iter_numbers, fail_rates,   marker='s', linewidth=2, markersize=6, color='tomato',     label='Fail Rate')
+    plt.plot(iter_numbers, halted_rates, marker='^', linewidth=2, markersize=6, color='darkorange', label='Halted Rate')
     plt.xlabel('Iteration Number'); plt.ylabel('Rate')
-    plt.title(f'Failed vs Halted Rate — {run_name}')
+    plt.title(f'Failed vs Halted — {run_name}{suffix}')
     plt.xticks(iter_numbers); plt.ylim(0, 1); plt.legend()
     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
-    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_fail_halted.png'), dpi=150)
+    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_fail_halted{suffix}.png'), dpi=150)
     plt.close()
 
     plt.figure(figsize=(8, 5))
-    plt.plot(iter_numbers, avg_steps, marker='D', linewidth=2,
-             markersize=6, color='mediumseagreen')
+    plt.plot(iter_numbers, avg_steps, marker='D', linewidth=2, markersize=6, color='mediumseagreen')
     plt.xlabel('Iteration Number'); plt.ylabel('Avg Implementations Tried')
-    plt.title(f'Avg Implementations — {run_name}')
+    plt.title(f'Avg Implementations — {run_name}{suffix}')
     plt.xticks(iter_numbers)
     plt.ylim(0, max(avg_steps) * 1.2 if avg_steps else 10)
     plt.grid(True, linestyle='--', alpha=0.6); plt.tight_layout()
-    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_avg_steps.png'), dpi=150)
+    plt.savefig(os.path.join(log_dir, f'{num_problems}_problems_avg_steps{suffix}.png'), dpi=150)
     plt.close()
-    print(f"Plots saved to {log_dir}")
 
 
-def save_metrics_csv(metrics, log_dir, run_name, num_problems):
-    csv_path = os.path.join(log_dir, f'{num_problems}_problems_metrics.csv')
+def save_metrics_csv(metrics, log_dir, run_name, num_problems, suffix=''):  # ← added suffix
+    csv_path = os.path.join(log_dir, f'{num_problems}_problems_metrics{suffix}.csv')
     with open(csv_path, 'w') as f:
         f.write('Iteration,SuccessRate,FailRate,HaltedRate,AvgSteps\n')
         for it, s, fa, h, st in zip(
@@ -824,16 +1141,11 @@ def save_metrics_csv(metrics, log_dir, run_name, num_problems):
 def save_metrics_json(metrics, log_dir, run_name):
     metrics_path = os.path.join(log_dir, f"{run_name}_metrics.json")
     summary = {k: v for k, v in metrics.items()
-               if k not in ("iter_numbers", "success_rates", "fail_rates",
-                             "halted_rates", "avg_steps")}
+               if k not in ("iter_numbers", "success_rates", "fail_rates", "halted_rates", "avg_steps")}
     with open(metrics_path, 'w') as f:
         json.dump(summary, f, indent=4)
     print(f"Metrics JSON saved to {metrics_path}")
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main(args):
     if not os.path.exists(args.root_dir):
@@ -852,81 +1164,59 @@ def main(args):
     print(f"""
 -----
 Starting run:
-  Strategy:  {args.strategy}
-  Model:     {args.model}
-  Language:  {args.language}
-  Pass@k:    {args.pass_at_k}
-  Max iters: {args.max_iters}
-  Dataset:   {args.dataset_path}
-  Logs:      {log_dir}
+  Strategy:  {args.strategy}  Model: {args.model}
+  Language:  {args.language}  Pass@k: {args.pass_at_k}
+  Max iters: {args.max_iters} Dataset: {args.dataset_path}
 -----
 """)
 
-    print('Loading the dataset...')
+    print('Loading dataset...')
     if args.dataset_path.endswith(".jsonl"):
         dataset = read_jsonl(args.dataset_path)
     elif args.dataset_path.endswith(".jsonl.gz"):
         dataset = read_jsonl_gz(args.dataset_path)
     else:
-        raise ValueError(f"Dataset path `{args.dataset_path}` is not supported")
+        raise ValueError(f"Unsupported dataset path: {args.dataset_path}")
     print(f"Loaded {len(dataset)} examples")
 
     trajectory_store = TrajectoryStore() if args.strategy == "retrieval" else None
+    gather_log       = None   # set below for expel
 
     try:
-        # ── ExpeL: self-contained two-phase run ──────────────────────────────
         if args.strategy == "expel":
             expel      = ExpeL(max_insights=10, retrieval_k=3)
             gather_log = log_path.replace('.jsonl', '_gather.jsonl')
 
-            # Phase 1 — gather
             print("\n=== ExpeL Phase 1: Gathering ===")
             run_expel_gather(
-                dataset=dataset,
-                model_name=args.model,
-                language=args.language,
-                max_iters=args.max_iters,
-                pass_at_k=args.pass_at_k,
-                log_path=gather_log,
-                verbose=args.verbose,
-                expel=expel,
-                is_leetcode=args.is_leetcode,
+                dataset=dataset, model_name=args.model, language=args.language,
+                max_iters=args.max_iters, pass_at_k=args.pass_at_k,
+                log_path=gather_log, verbose=args.verbose,
+                expel=expel, is_leetcode=args.is_leetcode,
             )
 
-            # Phase 2 — extract insights
             print("\n=== ExpeL Phase 2: Extracting Insights ===")
-            run_expel_extract_insights(expel, args.model)  # ← fixed
+            run_expel_extract_insights(expel, args.model)
 
-            # Phase 3 — eval (clear log first so gather results don't pollute)
             print("\n=== ExpeL Phase 3: Evaluation ===")
             if os.path.exists(log_path):
                 os.remove(log_path)
             import copy
             eval_dataset = copy.deepcopy(dataset)
             for item in eval_dataset:
-                item['is_solved'] = False  # reset so eval attempts all problems
+                item['is_solved'] = False
             run_expel_eval(
-                dataset=eval_dataset,
-                model_name=args.model,
-                language=args.language,
-                pass_at_k=args.pass_at_k,
-                log_path=log_path,
-                verbose=args.verbose,
-                expel=expel,
-                is_leetcode=args.is_leetcode,
+                dataset=eval_dataset, model_name=args.model, language=args.language,
+                pass_at_k=args.pass_at_k, log_path=log_path, verbose=args.verbose,
+                expel=expel, is_leetcode=args.is_leetcode,
             )
 
-        # ── All other strategies ─────────────────────────────────────────────
         else:
             run_strategy = strategy_factory(args.strategy)
             run_strategy(
-                dataset=dataset,
-                model_name=args.model,
-                language=args.language,
-                max_iters=args.max_iters,
-                pass_at_k=args.pass_at_k,
-                log_path=log_path,
-                verbose=args.verbose,
+                dataset=dataset, model_name=args.model, language=args.language,
+                max_iters=args.max_iters, pass_at_k=args.pass_at_k,
+                log_path=log_path, verbose=args.verbose,
                 expansion_factor=args.expansion_factor,
                 is_leetcode=args.is_leetcode,
                 trajectory_store=trajectory_store,
@@ -937,24 +1227,59 @@ Starting run:
         import traceback; traceback.print_exc()
 
     finally:
-        if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
-            metrics = compute_per_iter_metrics(log_path, args.max_iters)
+        if args.strategy == "expel":
+            # ── Gather metrics ────────────────────────────────────────────────
+            if gather_log and os.path.exists(gather_log) and os.path.getsize(gather_log) > 0:
+                g_metrics = compute_per_iter_metrics(gather_log, args.max_iters)
+                if g_metrics:
+                    print(f"\n--- ExpeL Gather Results ---")
+                    print(f"  Pass@1: {g_metrics['pass_at_1']:.2%} | "
+                          f"Solved: {g_metrics['solved']}/{g_metrics['total']}")
+                    save_metrics_json(g_metrics, log_dir, args.run_name + '_gather')
+                    save_metrics_csv(g_metrics, log_dir, args.run_name,
+                                     g_metrics['total'], suffix='_gather_metrics')  # ← gather CSV
+                    save_plots(g_metrics, log_dir, args.run_name,
+                               g_metrics['total'], suffix='_gather')
+
+            # ── Eval metrics ──────────────────────────────────────────────────
+            if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+                e_metrics = compute_per_iter_metrics(log_path, args.max_iters)
+                if e_metrics:
+                    print(f"\n--- ExpeL Eval Results ---")
+                    print(f"  Pass@1:         {e_metrics['pass_at_1']:.2%}")
+                    print(f"  Solved:         {e_metrics['solved']}/{e_metrics['total']}")
+                    print(f"  Failed:         {e_metrics['failed']}/{e_metrics['total']}")
+                    print(f"  Halted:         {e_metrics['halted']}/{e_metrics['total']}")
+                    save_metrics_json(e_metrics, log_dir, args.run_name + '_eval')
+                    save_metrics_csv(e_metrics, log_dir, args.run_name,
+                                     e_metrics['total'], suffix='_eval_metrics')  # ← eval CSV
+                    save_plots(e_metrics, log_dir, args.run_name,
+                               e_metrics['total'], suffix='_eval')
+                else:
+                    print("No eval results to save.")
+            else:
+                print("No eval log found.")
+
         else:
-            metrics = {}
-        if metrics:
-            num_problems = metrics["total"]
-            print(f"\n--- Results for {args.strategy} ---")
-            print(f"  Pass@1:          {metrics['pass_at_1']:.2%}")
-            print(f"  Solved:          {metrics['solved']}/{metrics['total']}")
-            print(f"  Failed:          {metrics['failed']}/{metrics['total']}")
-            print(f"  Halted:          {metrics['halted']}/{metrics['total']}")
-            print(f"  Avg iterations:  {metrics['avg_iters']}")
-            print(f"  Avg reflections: {metrics['avg_reflections']}")
-            save_metrics_json(metrics, log_dir, args.run_name)
-            save_metrics_csv(metrics, log_dir, args.run_name, num_problems)
-            save_plots(metrics, log_dir, args.run_name, num_problems)
-        else:
-            print("No results to save yet.")
+            # ── Non-ExpeL: single CSV as before ──────────────────────────────
+            if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+                metrics = compute_per_iter_metrics(log_path, args.max_iters)
+            else:
+                metrics = {}
+            if metrics:
+                num_problems = metrics["total"]
+                print(f"\n--- Results for {args.strategy} ---")
+                print(f"  Pass@1:          {metrics['pass_at_1']:.2%}")
+                print(f"  Solved:          {metrics['solved']}/{metrics['total']}")
+                print(f"  Failed:          {metrics['failed']}/{metrics['total']}")
+                print(f"  Halted:          {metrics['halted']}/{metrics['total']}")
+                print(f"  Avg iterations:  {metrics['avg_iters']}")
+                print(f"  Avg reflections: {metrics['avg_reflections']}")
+                save_metrics_json(metrics, log_dir, args.run_name)
+                save_metrics_csv(metrics, log_dir, args.run_name, num_problems)
+                save_plots(metrics, log_dir, args.run_name, num_problems)
+            else:
+                print("No results to save yet.")
 
     print(f"Done! Logs in `{log_path}`")
 

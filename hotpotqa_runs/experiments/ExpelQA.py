@@ -180,8 +180,18 @@ with open(insights_path, 'w') as f:
     f.write('\n'.join(expel.insights))
 print(f'Insights saved to {insights_path}')
 
+# ── Gather CSV ───────────────────────────────────────────────────────────────
+gather_csv_path = os.path.join(base_path, f'{N_TOTAL}_questions_gather_metrics.csv')
+with open(gather_csv_path, 'w') as f:
+    f.write('Trial,SuccessRate,FailRate,HaltedRate,AvgSteps\n')
+    for t, s, fa, h, st in zip(gather_trial_numbers, gather_success_rates,
+                                gather_incorrect_rates, gather_halt_rates,
+                                gather_avg_steps):
+        f.write(f'{t},{s:.4f},{fa:.4f},{h:.4f},{st:.4f}\n')
+print(f'Gather metrics CSV saved to {gather_csv_path}')
+
 # ── Single unified CSV (matches ALFWorld format) ─────────────────────────────
-csv_path = os.path.join(base_path, f'{N_TOTAL}_questions_metrics.csv')
+csv_path = os.path.join(base_path, f'{N_TOTAL}_questions_eval_metrics.csv')
 with open(csv_path, 'w') as f:
     f.write('Trial,SuccessRate,FailRate,HaltedRate,AvgSteps\n')
     # Trial 1 = eval result (single attempt)
@@ -189,4 +199,4 @@ with open(csv_path, 'w') as f:
             f'{eval_incorrect_rates[0]:.4f},'
             f'{eval_halt_rates[0]:.4f},'
             f'{eval_avg_steps[0]:.4f}\n')
-print(f'Metrics CSV saved to {csv_path}')
+print(f'Eval Metrics CSV saved to {csv_path}')
