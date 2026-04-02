@@ -179,14 +179,24 @@ def format_step_knowledge(knowledge: List[StepKnowledge]) -> str:
     return '\n'.join(lines)
 
 
+# STAR_STEP_INSTRUCTION = (
+#     "\n\nRespond in EXACTLY this format:\n"
+#     "THOUGHT: <your reasoning>\n"
+#     "ACTION: <Search[entity] or Lookup[keyword] or Finish[answer]>\n"
+#     "EXPECTED: <one sentence: what you expect this action to return>\n"
+#     "NEXT_INTENT: <one short phrase: what you plan to do after this>\n"
+#     "CORRECTION: <only if your previous EXPECTED was wrong — one generalizable rule. "
+#     "Omit this line entirely if previous prediction was accurate or this is the first step.>"
+# )
 STAR_STEP_INSTRUCTION = (
-    "\n\nRespond in EXACTLY this format:\n"
+    "\n\nNow respond. Do NOT use 'Thought N:' or 'Action N:' format. "
+    "Use EXACTLY these labels:\n"
     "THOUGHT: <your reasoning>\n"
-    "ACTION: <Search[entity] or Lookup[keyword] or Finish[answer]>\n"
-    "EXPECTED: <one sentence: what you expect this action to return>\n"
-    "NEXT_INTENT: <one short phrase: what you plan to do after this>\n"
-    "CORRECTION: <only if your previous EXPECTED was wrong — one generalizable rule. "
-    "Omit this line entirely if previous prediction was accurate or this is the first step.>"
+    "ACTION: <Search[X] or Lookup[X] or Finish[X]>\n"
+    "EXPECTED: <what you expect this action to return>\n"
+    "NEXT_INTENT: <what you plan to do after this, e.g. 'lookup birth year'>\n"
+    "CORRECTION: <only if previous EXPECTED was wrong — one generalizable rule. "
+    "Skip this line entirely if first step or prediction was accurate.>\n"
 )
 
 
@@ -261,17 +271,36 @@ class STARReactAgent:
         raw    = self.llm(prompt, REACT_SYSTEM_PROMPT) or ''
         parsed = parse_structured_response(raw)
 
-        thought     = parsed['thought'] or raw[:200]
+        # thought     = parsed['thought'] or raw[:200]
+        # action_str  = parsed['action']
+        # expected    = parsed['expected']
+        # next_intent = parsed['next_intent']
+        # correction  = parsed['correction']
+
+        thought     = parsed['thought']
         action_str  = parsed['action']
         expected    = parsed['expected']
         next_intent = parsed['next_intent']
         correction  = parsed['correction']
+
+        # Fallback if structured parsing failed entirely
+        if not thought and not action_str:
+            print('  [STAR] Structured parse failed — falling back to ReAct format')
+            for line in raw.split('\n'):
+                line = line.strip()
+                if not thought and re.match(r'Thought\s*\d*\s*:', line, re.IGNORECASE):
+                    thought = line.split(':', 1)[-1].strip()
+                if not action_str and any(a in line for a in ['Search[', 'Lookup[', 'Finish[']):
+                    action_str = line.strip()
 
         # 3. Update scratchpad
         self.scratchpad += f'\nThought {self.step_n}: {thought}'
         self.scratchpad += f'\nAction {self.step_n}: {action_str}'
         print(f'Thought {self.step_n}: {thought[:80]}')
         print(f'ACTION=> {action_str}')
+        print("EXPECTED:",expected)
+        print("NEXT_INTENT:", next_intent)
+        print('CORRECTION:',correction)
 
         action_type, argument = '', ''
         try:
@@ -382,20 +411,33 @@ class STARReactAgent:
     # Agent prompt — uses existing react_reflect_agent_prompt template
     # ------------------------------------------------------------------
 
+    # def _build_agent_prompt(self, knowledge_str: str = '') -> str:
+    #     # Use the same prompt template as ReactReflectAgent in retrieval_agents.py
+    #     base = react_reflect_agent_prompt.format(
+    #         examples    = self.react_examples,
+    #         reflections = self.reflections_str,
+    #         question    = self.question,
+    #         scratchpad  = self.scratchpad,
+    #     )
+    #     # Append structured output instruction
+    #     base += STAR_STEP_INSTRUCTION
+    #     # Prepend step knowledge
+    #     if knowledge_str:
+    #         return knowledge_str + "\n" + base
+    #     return base
+
+    # Replace the entire method with this:
     def _build_agent_prompt(self, knowledge_str: str = '') -> str:
-        # Use the same prompt template as ReactReflectAgent in retrieval_agents.py
-        base = react_reflect_agent_prompt.format(
-            examples    = self.react_examples,
-            reflections = self.reflections_str,
-            question    = self.question,
-            scratchpad  = self.scratchpad,
-        )
-        # Append structured output instruction
-        base += STAR_STEP_INSTRUCTION
-        # Prepend step knowledge
+        parts = []
         if knowledge_str:
-            return knowledge_str + "\n" + base
-        return base
+            parts.append(knowledge_str)
+        parts.append(self.react_examples)
+        if self.reflections_str:
+            parts.append(self.reflections_str)
+        parts.append(f"Question: {self.question}")
+        parts.append(f"Scratchpad:\n{self.scratchpad}")
+        parts.append(STAR_STEP_INSTRUCTION)
+        return '\n\n'.join(parts)
 
     # ------------------------------------------------------------------
     # Standard interface — compatible with summarize_react_trial / log_react_trial
