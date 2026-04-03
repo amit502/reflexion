@@ -427,11 +427,24 @@ class STARReactAgent:
     #     return base
 
     # Replace the entire method with this:
+    # def _build_agent_prompt(self, knowledge_str: str = '') -> str:
+    #     parts = []
+    #     if knowledge_str:
+    #         parts.append(knowledge_str)
+    #     parts.append(self.react_examples)
+    #     if self.reflections_str:
+    #         parts.append(self.reflections_str)
+    #     parts.append(f"Question: {self.question}")
+    #     parts.append(f"Scratchpad:\n{self.scratchpad}")
+    #     parts.append(STAR_STEP_INSTRUCTION)
+    #     return '\n\n'.join(parts)
+
     def _build_agent_prompt(self, knowledge_str: str = '') -> str:
         parts = []
         if knowledge_str:
             parts.append(knowledge_str)
         parts.append(self.react_examples)
+        parts.append('(END OF EXAMPLES)')   # ← add this
         if self.reflections_str:
             parts.append(self.reflections_str)
         parts.append(f"Question: {self.question}")
