@@ -39,22 +39,24 @@ from prompts import (
 from fewshots import WEBTHINK_SIMPLE6, REFLECTIONS, WEBTHINK_SIMPLE2
 from sentence_transformers import SentenceTransformer
 
-# ── Import RAR components unchanged ─────────────────────────────────────────
+# ── Import RAR components — exact names from retrieval_agents.py ─────────────
 from retrieval_agents import (
     TrajectoryRecord,
     TrajectoryStore,
     classify_error,
-    build_retrieval_reflection_prompt,
     format_retrieved_trajectories,
-    HOTPOTQA_ERROR_TAXONOMY,
+    RETRIEVAL_REFLECTION_HEADER,
+    format_last_attempt,
+    format_reflections,
 )
 
 
-class ReflexionStrategy(Enum):
-    NONE                           = 'base'
-    REFLEXION                      = 'reflexion'
-    RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
-    STAR                           = 'star'
+
+
+NONE                           = 'base'
+REFLEXION                      = 'reflexion'
+RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
+STAR                           = 'star'
 
 
 # ---------------------------------------------------------------------------
@@ -326,10 +328,11 @@ class STARReactAgent:
             print(observation)
             # Store successful trajectory in RAR store
             self.trajectory_store.add(TrajectoryRecord(
-                question   = self.question,
-                scratchpad = self.scratchpad,
-                reflection = '',
-                success    = self.is_correct(),
+                question    = self.question,
+                scratchpad  = self.scratchpad,
+                reflection  = '',
+                success     = True,
+                error_class = 'SUCCESS',
             ))
             self.step_n += 1
             return
@@ -407,12 +410,12 @@ class STARReactAgent:
     def _reflect(self) -> None:
         print('  [STAR] Reflecting...')
 
-        # ── RAR: classify error and retrieve similar trajectories ────────────
+        # ── RAR: classify error (same signature as retrieval_agents.py) ───────
         error_class = classify_error(
-            question   = self.question,
-            scratchpad = self.scratchpad,
-            llm_fn     = lambda p: self.reflect_llm(p, CLASSIFY_ERROR_SYSTEM_PROMPT),
-        )
+            self.question, self.scratchpad, self.reflect_llm)
+        print(f'  Error class: {error_class}')
+
+        # ── RAR: retrieve similar trajectories ───────────────────────────────
         retrieved = self.trajectory_store.retrieve(
             question    = self.question,
             error_class = error_class,
@@ -422,16 +425,28 @@ class STARReactAgent:
               f'({sum(1 for r in retrieved if r.success)} successes, '
               f'{sum(1 for r in retrieved if not r.success)} failures)')
 
-        # ── STAR: also retrieve step knowledge as additional context ─────────
+        # ── STAR: step knowledge as additional context ────────────────────────
         recent_knowledge = self.knowledge_store.retrieve(self.question, k=3)
         knowledge_ctx    = format_step_knowledge(recent_knowledge)
 
-        # ── Build reflection prompt: retrieved trajectories + step knowledge ──
-        reflection_prompt = build_retrieval_reflection_prompt(
-            question    = self.question,
-            scratchpad  = self.scratchpad,
-            error_class = error_class,
-            retrieved   = retrieved,
+        # ── Build reflection prompt: same as RAR + step knowledge ─────────────
+        retrieved_context  = format_retrieved_trajectories(retrieved)
+        current_block = (
+            "\n=== CURRENT FAILED TRAJECTORY ===\n"
+            f"Question: {self.question}\n"
+            f"Error class: {error_class}\n\n"
+            f"{truncate_scratchpad(self.scratchpad, tokenizer=self.enc).strip()}\n"
+        )
+        instruction = (
+            "\nWrite a reflection for the CURRENT FAILED TRAJECTORY in EXACTLY this format:\n\n"
+            "FAILED_STEP: <the step where reasoning went wrong>\n"
+            "WHAT_WENT_WRONG: <one sentence explaining the root cause>\n"
+            "WHAT_TO_DO_DIFFERENTLY: <exact first action to take in next trial>\n"
+            "GENERALISATION: <one sentence on when this fix applies beyond this question>\n"
+        )
+        reflection_prompt = (
+            RETRIEVAL_REFLECTION_HEADER + retrieved_context +
+            current_block + instruction
         )
         if knowledge_ctx:
             reflection_prompt = knowledge_ctx + "\n" + reflection_prompt
@@ -440,24 +455,24 @@ class STARReactAgent:
             self.reflect_llm(reflection_prompt, REFLECTION_SYSTEM_PROMPT))
         print(f'  Reflection: {reflection[:120]}...')
 
-        # ── Store trajectory with reflection in RAR store ────────────────────
+        # ── Store trajectory (same as RAR) ────────────────────────────────────
         self.trajectory_store.add(TrajectoryRecord(
-            question   = self.question,
-            scratchpad = self.scratchpad,
-            reflection = reflection,
-            success    = False,
+            question    = self.question,
+            scratchpad  = self.scratchpad,
+            reflection  = reflection,
+            success     = False,
+            error_class = error_class,
         ))
 
-        # ── reflections_str: only reflections from retrieved trajectories ────
-        # Same as RAR — not all reflections, only retrieved ones
-        retrieved_reflections = [r.reflection for r in retrieved if r.reflection]
-        retrieved_reflections.append(reflection)   # add current reflection
-        if retrieved_reflections:
-            self.reflections_str = (
-                REFLECTION_HEADER + 'Reflections:\n- ' +
-                '\n- '.join(r.strip() for r in retrieved_reflections[-3:])
-                # cap at 3 to control token count
-            )
+        # ── reflections_str: same format as RAR ───────────────────────────────
+        # last attempt scratchpad + current reflection only
+        # NOT all accumulated reflections — token efficient
+        self.reflections     = [reflection]
+        self.reflections_str = (
+            format_last_attempt(self.question, self.scratchpad) +
+            format_reflections(self.reflections,
+                               header=REFLECTION_AFTER_LAST_TRIAL_HEADER)
+        )
         print(self.reflections_str)
 
     # ------------------------------------------------------------------
