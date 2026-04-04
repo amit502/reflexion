@@ -197,6 +197,43 @@ Action: Finish[Trade]
 Reflection: My answer was incorrect, as I stated that the primary purpose of the Great Wall of China was for trade. After reevaluating the context, I realized that the wall was built primarily to protect the Chinese Empire from invasions by various nomadic groups. My confusion may have stemmed from the fact that the wall is a significant historical landmark that may have played a role in trade routes. Next time, I will focus on the key details provided in the context to ensure the accuracy of my response.
 """
 
+# WEBTHINK_SIMPLE2 = """Question: What is the elevation range for the area that the eastern sector of the Colorado orogeny extends into?
+# THOUGHT: I need to search Colorado orogeny to find what area the eastern sector extends into, then find its elevation range.
+# ACTION: Search[Colorado orogeny]
+# EXPECTED: An overview of the Colorado orogeny and the areas it covers.
+# NEXT_INTENT: lookup eastern sector in the article
+# Observation 1: The Colorado orogeny was an episode of mountain building in Colorado and surrounding areas.
+# THOUGHT: It does not mention the eastern sector. I need to look up eastern sector.
+# ACTION: Lookup[eastern sector]
+# EXPECTED: A description of where the eastern sector extends into.
+# NEXT_INTENT: search High Plains elevation range
+# Observation 2: (Result 1 / 1) The eastern sector extends into the High Plains and is called the Central Plains orogeny.
+# THOUGHT: The eastern sector extends into the High Plains. I need to find the elevation range of High Plains.
+# ACTION: Search[High Plains (United States)]
+# EXPECTED: The elevation range of the High Plains region.
+# NEXT_INTENT: finish with elevation range
+# Observation 3: The High Plains rise in elevation from around 1,800 to 7,000 ft (550 to 2,130 m).
+# THOUGHT: High Plains rise from 1,800 to 7,000 ft, so that is the answer.
+# ACTION: Finish[1,800 to 7,000 ft]
+# EXPECTED: Correct answer confirmed.
+# NEXT_INTENT: done
+
+# Question: Musician and satirist Allie Goertz wrote a song about the "The Simpsons" character Milhouse, who Matt Groening named after who?
+# THOUGHT: The question is about who Milhouse is named after. I should search Milhouse directly.
+# ACTION: Search[Milhouse]
+# EXPECTED: Information about the Simpsons character Milhouse including who he was named after.
+# NEXT_INTENT: lookup named after if not in first result
+# Observation 1: Milhouse Mussolini Van Houten is a recurring character in the Fox animated television series The Simpsons voiced by Pamela Hayden and created by Matt Groening.
+# THOUGHT: The paragraph does not say who Milhouse is named after. I need to look up named after.
+# ACTION: Lookup[named after]
+# EXPECTED: The person that Matt Groening named Milhouse after.
+# NEXT_INTENT: finish with the answer
+# Observation 2: (Result 1 / 1) Milhouse was named after U.S. president Richard Nixon, whose middle name was Milhous.
+# THOUGHT: Milhouse was named after Richard Nixon, so that is the answer.
+# ACTION: Finish[Richard Nixon]
+# EXPECTED: Correct answer confirmed.
+# NEXT_INTENT: done"""
+
 WEBTHINK_SIMPLE2 = """Question: What is the elevation range for the area that the eastern sector of the Colorado orogeny extends into?
 THOUGHT: I need to search Colorado orogeny to find what area the eastern sector extends into, then find its elevation range.
 ACTION: Search[Colorado orogeny]
@@ -207,6 +244,7 @@ THOUGHT: It does not mention the eastern sector. I need to look up eastern secto
 ACTION: Lookup[eastern sector]
 EXPECTED: A description of where the eastern sector extends into.
 NEXT_INTENT: search High Plains elevation range
+CORRECTION: Search[topic] returns a brief summary not a full overview — use Lookup to find specific details within the article.
 Observation 2: (Result 1 / 1) The eastern sector extends into the High Plains and is called the Central Plains orogeny.
 THOUGHT: The eastern sector extends into the High Plains. I need to find the elevation range of High Plains.
 ACTION: Search[High Plains (United States)]
