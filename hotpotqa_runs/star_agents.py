@@ -51,12 +51,11 @@ from retrieval_agents import (
 )
 
 
-
-
-NONE                           = 'base'
-REFLEXION                      = 'reflexion'
-RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
-STAR                           = 'star'
+class ReflexionStrategy(Enum):
+    NONE                           = 'base'
+    REFLEXION                      = 'reflexion'
+    RETRIEVED_TRAJECTORY_REFLEXION = 'retrieved_trajectory_reflexion'
+    STAR                           = 'star'
 
 
 # ---------------------------------------------------------------------------
